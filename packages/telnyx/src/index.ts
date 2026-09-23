@@ -9,6 +9,7 @@ import type { AppConfig } from '@syscall/config';
 export interface TelnyxCallInput { phoneE164: string; webhookUrl: string; }
 export interface TelnyxMessageInput { to: string; text: string; }
 export interface TelnyxGatherInput { payload: string; }
+export interface TelnyxSpeakInput { payload: string; }
 
 // Ensures provider-dependent actions explain exactly which integration is missing.
 function requireTelnyx(config: AppConfig): void {
@@ -33,8 +34,8 @@ export async function gatherUsingSpeak(config: AppConfig, callControlId: string,
   return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/gather_using_speak`, {
     payload: input.payload,
     payload_type: 'text',
-    service_level: 'basic',
-    voice: 'female',
+    service_level: 'premium',
+    voice: 'AWS.Polly.Joanna-Neural',
     language: 'en-US',
     minimum_digits: 1,
     maximum_digits: 1,
@@ -42,6 +43,17 @@ export async function gatherUsingSpeak(config: AppConfig, callControlId: string,
     terminating_digit: '',
     timeout_millis: 10000,
     maximum_tries: 2,
+  });
+}
+
+// Speaks a result message after the caller selects an IVR option.
+export async function speakText(config: AppConfig, callControlId: string, input: TelnyxSpeakInput): Promise<Record<string, unknown>> {
+  return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/speak`, {
+    payload: input.payload,
+    payload_type: 'text',
+    service_level: 'premium',
+    voice: 'AWS.Polly.Joanna-Neural',
+    language: 'en-US',
   });
 }
 

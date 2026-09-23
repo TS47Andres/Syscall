@@ -54,7 +54,12 @@ export async function sendSms(config: AppConfig, input: TelnyxMessageInput): Pro
 export function verifyWebhookSignature(config: AppConfig, rawBody: string, signature: string | undefined, timestamp: string | undefined): boolean {
   if (!config.TELNYX_PUBLIC_KEY || !signature || !timestamp) return false;
   try {
-    const publicKey = crypto.createPublicKey({ key: Buffer.from(config.TELNYX_PUBLIC_KEY, 'base64'), format: 'der', type: 'spki' });
+    const webhookTime = Number(timestamp);
+    if (!Number.isSafeInteger(webhookTime) || Math.abs(Math.floor(Date.now() / 1000) - webhookTime) > 300) return false;
+    const rawPublicKey = Buffer.from(config.TELNYX_PUBLIC_KEY, 'base64');
+    if (rawPublicKey.length !== 32) return false;
+    const spkiPrefix = Buffer.from('302a300506032b6570032100', 'hex');
+    const publicKey = crypto.createPublicKey({ key: Buffer.concat([spkiPrefix, rawPublicKey]), format: 'der', type: 'spki' });
     return crypto.verify(null, Buffer.from(`${timestamp}|${rawBody}`), publicKey, Buffer.from(signature, 'base64'));
   } catch {
     return false;

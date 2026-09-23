@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+storage/raw-mail/*
+storage/attachments/*
+!storage/raw-mail/.gitkeep
+!storage/attachments/.gitkeep
+*.log

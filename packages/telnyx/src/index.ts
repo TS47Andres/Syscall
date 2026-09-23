@@ -8,6 +8,7 @@ import type { AppConfig } from '@syscall/config';
 
 export interface TelnyxCallInput { phoneE164: string; webhookUrl: string; }
 export interface TelnyxMessageInput { to: string; text: string; }
+export interface TelnyxGatherInput { payload: string; }
 
 // Ensures provider-dependent actions explain exactly which integration is missing.
 function requireTelnyx(config: AppConfig): void {
@@ -27,6 +28,23 @@ export async function startOutboundCall(config: AppConfig, input: TelnyxCallInpu
   return telnyxRequest(config, '/calls', { connection_id: config.TELNYX_CONNECTION_ID, to: input.phoneE164, from: config.TELNYX_PHONE_NUMBER, webhook_url: input.webhookUrl, webhook_url_method: 'POST', webhook_api_version: '2' });
 }
 
+// Speaks the initial IVR prompt and waits for one of the account-flow digits.
+export async function gatherUsingSpeak(config: AppConfig, callControlId: string, input: TelnyxGatherInput): Promise<Record<string, unknown>> {
+  return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/gather_using_speak`, {
+    payload: input.payload,
+    payload_type: 'text',
+    service_level: 'basic',
+    voice: 'female',
+    language: 'en-US',
+    minimum_digits: 1,
+    maximum_digits: 1,
+    valid_digits: '12',
+    terminating_digit: '',
+    timeout_millis: 10000,
+    maximum_tries: 2,
+  });
+}
+
 // Sends an SMS through the configured Telnyx messaging profile.
 export async function sendSms(config: AppConfig, input: TelnyxMessageInput): Promise<Record<string, unknown>> {
   return telnyxRequest(config, '/messages', { from: config.TELNYX_PHONE_NUMBER, to: input.to, text: input.text, messaging_profile_id: config.TELNYX_MESSAGING_PROFILE_ID });
@@ -37,7 +55,7 @@ export function verifyWebhookSignature(config: AppConfig, rawBody: string, signa
   if (!config.TELNYX_PUBLIC_KEY || !signature || !timestamp) return false;
   try {
     const publicKey = crypto.createPublicKey({ key: Buffer.from(config.TELNYX_PUBLIC_KEY, 'base64'), format: 'der', type: 'spki' });
-    return crypto.verify(null, Buffer.from(`${timestamp}.${rawBody}`), publicKey, Buffer.from(signature, 'base64'));
+    return crypto.verify(null, Buffer.from(`${timestamp}|${rawBody}`), publicKey, Buffer.from(signature, 'base64'));
   } catch {
     return false;
   }
@@ -48,4 +66,3 @@ export function webhookUrl(config: AppConfig, kind: 'voice' | 'sms'): string {
   if (!config.PUBLIC_WEBHOOK_BASE_URL) throw new Error('PUBLIC_WEBHOOK_BASE_URL is missing; cannot generate a Telnyx webhook URL.');
   return `${config.PUBLIC_WEBHOOK_BASE_URL.replace(/\/$/, '')}/webhooks/telnyx/${kind}`;
 }
-

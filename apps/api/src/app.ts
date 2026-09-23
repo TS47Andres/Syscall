@@ -11,7 +11,7 @@ import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import { AuditLog, Draft, Email, User, WebhookEvent, pingDatabase, type UserDocument } from '@syscall/db';
 import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue } from '@syscall/queues';
-import { startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
+import { gatherUsingSpeak, startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
 import { isTelnyxConfigured } from '@syscall/config';
 import { toPhoneE164, addressSchema, passwordSchema, phoneSchema } from '@syscall/validation';
 import { scanWithClamAv } from '@syscall/mail';
@@ -27,6 +27,13 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   const smsQueue = createSmsQueue(redis);
   const context: ServiceContext = { config, redis, outboundQueue, unreadQueue, smsQueue };
   const app = Fastify({ logger: false });
+  type RawBodyRequest = FastifyRequest & { rawBody?: string };
+  app.removeContentTypeParser('application/json');
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
+    const rawBody = body as string;
+    (request as RawBodyRequest).rawBody = rawBody;
+    try { done(null, JSON.parse(rawBody)); } catch (error) { done(error as Error, undefined); }
+  });
   await app.register(cors, { origin: false });
 
   // Creates an HTTP-aware error without requiring a global error plugin.
@@ -141,7 +148,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
 
   // Processes a verified provider event exactly once before invoking provider-specific behavior.
   async function handleTelnyxWebhook(request: FastifyRequest, kind: 'voice' | 'sms'): Promise<Record<string, unknown>> {
-    const rawBody = JSON.stringify(request.body ?? {}); const signature = request.headers['telnyx-signature-ed25519']; const timestamp = request.headers['telnyx-timestamp']; const signatureValue = Array.isArray(signature) ? signature[0] : signature; const timestampValue = Array.isArray(timestamp) ? timestamp[0] : timestamp;
+    const rawBody = (request as RawBodyRequest).rawBody ?? JSON.stringify(request.body ?? {}); const signature = request.headers['telnyx-signature-ed25519']; const timestamp = request.headers['telnyx-timestamp']; const signatureValue = Array.isArray(signature) ? signature[0] : signature; const timestampValue = Array.isArray(timestamp) ? timestamp[0] : timestamp;
     if (!verifyWebhookSignature(config, rawBody, signatureValue, timestampValue)) throw httpError(401, 'Invalid Telnyx webhook signature.');
     const event = request.body as { data?: { id?: string; event_type?: string; payload?: Record<string, unknown> } }; const eventId = event.data?.id; if (!eventId) return { received: true };
     try { await WebhookEvent.create({ providerEventId: eventId, eventType: event.data?.event_type ?? kind }); } catch (error) { if ((error as { code?: number }).code === 11000) return { received: true, duplicate: true }; throw error; }
@@ -152,10 +159,15 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   // Applies the small outbound IVR state machine to an answered call or DTMF event.
   async function processVoiceEvent(serviceContext: ServiceContext, eventType: string, payload: Record<string, unknown>): Promise<void> {
     const phone = typeof payload.to === 'string' ? payload.to : typeof payload.from === 'string' ? payload.from : null;
+    const callControlId = typeof payload.call_control_id === 'string' ? payload.call_control_id : null;
+    const digit = typeof payload.digit === 'string' ? payload.digit : typeof payload.digits === 'string' ? payload.digits : null;
     if (!phone) return;
-    if (eventType.includes('answered')) logger.info({ eventType }, 'Outbound call answered; IVR menu is ready');
-    if (eventType.includes('gather') && payload.digits === '1') { const result = await ensureUserForPhone(serviceContext.config, phone); await audit('ivr_account_creation_attempt', result.user._id, [], { created: result.created }); if (result.created) { await audit('account_created', result.user._id, [result.user.publicId]); await queueSms(serviceContext, { phoneE164: result.user.phoneE164, body: `Your PhoneMail account ${result.user.emailAddress} has been created.` }); } }
-    if (eventType.includes('gather') && payload.digits === '2') { const user = await User.findOne({ phoneE164: toPhoneE164(phone) }); if (user) { const token = cryptoRandomToken(); const { ResetToken } = await import('@syscall/db'); await ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) }); await queueSms(serviceContext, { phoneE164: user.phoneE164, body: `Reset your PhoneMail password: ${config.PUBLIC_WEBHOOK_BASE_URL}/reset-password?token=${token}` }); } }
+    if (eventType === 'call.answered' && callControlId) {
+      await gatherUsingSpeak(serviceContext.config, callControlId, { payload: 'Welcome to Syscall. Press 1 to create your account, or press 2 to reset your password.' });
+      logger.info({ eventType }, 'Outbound call answered; IVR prompt started');
+    }
+    if (eventType === 'call.dtmf.received' && digit === '1') { const result = await ensureUserForPhone(serviceContext.config, phone); await audit('ivr_account_creation_attempt', result.user._id, [], { created: result.created }); if (result.created) { await audit('account_created', result.user._id, [result.user.publicId]); await queueSms(serviceContext, { phoneE164: result.user.phoneE164, body: `Your PhoneMail account ${result.user.emailAddress} has been created.` }); } }
+    if (eventType === 'call.dtmf.received' && digit === '2') { const user = await User.findOne({ phoneE164: toPhoneE164(phone) }); if (user) { const token = cryptoRandomToken(); const { ResetToken } = await import('@syscall/db'); await ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + serviceContext.config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) }); await queueSms(serviceContext, { phoneE164: user.phoneE164, body: `Reset your PhoneMail password: ${serviceContext.config.PUBLIC_WEBHOOK_BASE_URL}/reset-password?token=${token}` }); } }
   }
 
   // Creates a reset token with enough entropy for a one-time link.

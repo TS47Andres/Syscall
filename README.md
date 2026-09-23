@@ -8,7 +8,7 @@ Syscall is a production-style local backend foundation for the PhoneMail hackath
 - `smtp` is the internal `smtp-server` listener. It validates local identities, parses MIME, validates/scans attachments, and stores accepted mail.
 - `worker` consumes BullMQ jobs for SMTP delivery, delayed unread checks, and Telnyx SMS.
 - MongoDB stores domain records and audit logs; Redis stores sessions and queue state; ClamAV is mandatory for accepted messages.
-- `cloudflared` runs the official remotely managed Cloudflare Tunnel image and requires `CLOUDFLARE_TUNNEL_TOKEN`.
+- Tailscale Funnel provides optional host-side HTTPS ingress for Telnyx webhooks without requiring a custom domain.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for schemas, contracts, flows, decisions, and risks.
 
@@ -16,30 +16,40 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for schemas, contracts, flows, decisions,
 
 ```powershell
 Copy-Item .env.example .env
-# Populate Telnyx and Cloudflare values when testing provider integrations.
+# Populate Telnyx values when testing provider integrations.
 docker compose up -d --build
 ```
 
-The required deployment command is `docker compose up -d` after `.env` is configured. Compose starts MongoDB, Redis, ClamAV, API, SMTP, worker, and Cloudflare Tunnel. The tunnel intentionally fails clearly if `CLOUDFLARE_TUNNEL_TOKEN` is missing. SMTP is only reachable inside the Docker network.
+The required deployment command is `docker compose up -d` after `.env` is configured. Compose starts MongoDB, Redis, ClamAV, API, SMTP, and worker. SMTP is only reachable inside the Docker network. Public ingress is managed outside Docker by Tailscale so the database, queue, SMTP listener, and malware scanner remain private.
 
 ## Environment
 
 All supported variables are listed in `.env.example`. Required operational values are `MONGODB_URI`, `REDIS_URL`, `SMTP_HOST`, `CLAMAV_HOST`, `CLAMAV_PORT`, storage paths, and—when using Telnyx—`TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_PHONE_NUMBER`, `TELNYX_CONNECTION_ID`, `TELNYX_MESSAGING_PROFILE_ID`, and `PUBLIC_WEBHOOK_BASE_URL`.
 
-## Cloudflare Tunnel
+## Tailscale Funnel
 
-Create a remotely managed tunnel in Cloudflare and configure a published application route:
+Install Tailscale for Windows, sign in, and enable MagicDNS, HTTPS certificates, and Funnel for your tailnet. Tailscale provides a `*.ts.net` hostname and HTTPS certificate.
 
-```text
-https://<your-configured-domain>  ->  http://api:3000
+After the Docker stack is healthy, run:
+
+```powershell
+npm run tailscale:funnel
 ```
 
-Put only the tunnel token in `CLOUDFLARE_TUNNEL_TOKEN`. Do not commit it. Set `PUBLIC_WEBHOOK_BASE_URL=https://<your-configured-domain>`; the generated Telnyx URLs are then:
+The helper checks the local API and publishes only `/webhooks/telnyx`. It does not expose MongoDB, Redis, SMTP, ClamAV, or the rest of the API. Copy the hostname printed by Tailscale and set it in `.env`:
+
+```env
+PUBLIC_WEBHOOK_BASE_URL=https://<your-machine>.<your-tailnet>.ts.net
+```
+
+The generated Telnyx URLs are then:
 
 ```text
-https://<your-configured-domain>/webhooks/telnyx/voice
-https://<your-configured-domain>/webhooks/telnyx/sms
+https://<your-machine>.<your-tailnet>.ts.net/webhooks/telnyx/voice
+https://<your-machine>.<your-tailnet>.ts.net/webhooks/telnyx/sms
 ```
+
+Use `npm run tailscale:funnel:status` to inspect the current route and `npm run tailscale:funnel:reset` to remove it. The URL is public, so Telnyx signature verification remains mandatory.
 
 ## Telnyx setup
 
@@ -96,9 +106,9 @@ The volume reset command is destructive and removes local persisted data.
 
 ## Final handoff checklist
 
-- Containers: `api`, `smtp`, `worker`, `mongodb`, `redis`, `clamav`, `cloudflared`.
+- Containers: `api`, `smtp`, `worker`, `mongodb`, `redis`, `clamav`.
 - Host port: `3000` by default (`API_PORT` controls the host side). SMTP is internal on `2525`; MongoDB, Redis, and ClamAV are internal only.
-- Missing variables in a fresh `.env`: Telnyx credentials, `PUBLIC_WEBHOOK_BASE_URL`, and Cloudflare token. These are intentionally not fabricated.
-- Cloudflare action: create the remotely managed tunnel and route its hostname to `http://api:3000`.
+- Missing variables in a fresh `.env`: Telnyx credentials and `PUBLIC_WEBHOOK_BASE_URL`. These are intentionally not fabricated.
+- Tailscale action: sign in, enable Funnel, run `npm run tailscale:funnel`, and copy the generated hostname into `PUBLIC_WEBHOOK_BASE_URL`.
 - Telnyx action: configure the Voice Application, Messaging Profile, and webhook URLs printed by `npm run telnyx:config`.
 - Known limitations: inbound calling, aliases, groups, external mail, spam classification, and public MX/DNS are intentionally not implemented. Telnyx provider event variation may require account-specific IVR event mapping.

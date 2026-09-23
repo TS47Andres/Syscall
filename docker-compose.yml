@@ -113,13 +113,6 @@ services:
       smtp:
         condition: service_healthy
 
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN is required}
-    depends_on:
-      api:
-        condition: service_healthy
-
 volumes:
   mongodb-data:
   redis-data:

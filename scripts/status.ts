@@ -17,9 +17,8 @@ async function printStatus(): Promise<void> {
     console.error(`API readiness unavailable: ${error instanceof Error ? error.message : 'unknown error'}`);
     process.exitCode = 1;
   }
-  console.log(`Cloudflare Tunnel: ${config.CLOUDFLARE_TUNNEL_TOKEN ? 'CONFIGURED' : 'NOT CONFIGURED'}`);
+  console.log(`Public webhook base URL: ${config.PUBLIC_WEBHOOK_BASE_URL ? 'CONFIGURED' : 'NOT CONFIGURED'}`);
   console.log(`Telnyx: ${isTelnyxConfigured(config) ? 'CONFIGURED' : 'NOT CONFIGURED'}`);
 }
 
 void printStatus();
-

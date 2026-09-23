@@ -2,7 +2,7 @@
 
 ## Summary
 
-Syscall is a local-only, single-recipient/single-sender PhoneMail mail system. The API owns synchronous HTTP workflows and domain orchestration; the SMTP service owns SMTP protocol handling and security gates; the worker owns durable asynchronous delivery and delayed unread notifications. MongoDB is the source of truth for users, mail, drafts, audit records, and webhook idempotency. Redis stores sessions and BullMQ state. Raw MIME and generated attachment files live on the shared mail-storage volume.
+Syscall is a local-only, single-recipient/single-sender PhoneMail mail system. The API owns synchronous HTTP workflows and domain orchestration; the SMTP service owns SMTP protocol handling and security gates; the worker owns durable asynchronous delivery and delayed unread notifications. MongoDB is the source of truth for users, mail, drafts, audit records, and webhook idempotency. Redis stores sessions and BullMQ state. Raw MIME and generated attachment files live on the shared mail-storage volume. Tailscale Funnel is an optional host-side ingress that publishes only the Telnyx webhook path for end-to-end testing; data services and SMTP remain private.
 
 ## Proposed tree
 

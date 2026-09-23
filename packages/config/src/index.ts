@@ -23,7 +23,6 @@ const environmentSchema = z.object({
   TELNYX_PHONE_NUMBER: z.string().optional().or(z.literal('')),
   TELNYX_CONNECTION_ID: z.string().optional().or(z.literal('')),
   TELNYX_MESSAGING_PROFILE_ID: z.string().optional().or(z.literal('')),
-  CLOUDFLARE_TUNNEL_TOKEN: z.string().optional().or(z.literal('')),
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: z.coerce.number().int().positive().default(2525),
   SMTP_MAX_MESSAGE_SIZE_MB: z.coerce.number().positive().default(25),
@@ -50,4 +49,3 @@ export function loadConfig(): AppConfig {
 export function isTelnyxConfigured(config: AppConfig): boolean {
   return Boolean(config.TELNYX_API_KEY && config.TELNYX_PUBLIC_KEY && config.TELNYX_PHONE_NUMBER && config.TELNYX_CONNECTION_ID && config.TELNYX_MESSAGING_PROFILE_ID && config.PUBLIC_WEBHOOK_BASE_URL);
 }
-

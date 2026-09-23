@@ -11,7 +11,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "status": "tsx scripts/status.ts",
-    "telnyx:config": "tsx scripts/telnyx-config.ts"
+    "telnyx:config": "tsx scripts/telnyx-config.ts",
+    "tailscale:funnel": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tailscale-funnel.ps1",
+    "tailscale:funnel:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tailscale-funnel.ps1 -Status",
+    "tailscale:funnel:reset": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tailscale-funnel.ps1 -Reset"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.1",

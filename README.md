@@ -24,7 +24,7 @@ The required deployment command is `docker compose up -d` after `.env` is config
 
 ## Environment
 
-All supported variables are listed in `.env.example`. Required operational values are `MONGODB_URI`, `REDIS_URL`, `SMTP_HOST`, `CLAMAV_HOST`, `CLAMAV_PORT`, storage paths, and—when using Telnyx—`TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_PHONE_NUMBER`, `TELNYX_CONNECTION_ID`, `TELNYX_MESSAGING_PROFILE_ID`, and `PUBLIC_WEBHOOK_BASE_URL`.
+All supported variables are listed in `.env.example`. Required operational values are `MONGODB_URI`, `REDIS_URL`, `SMTP_HOST`, `CLAMAV_HOST`, `CLAMAV_PORT`, storage paths, and—when using Telnyx—`TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY`, `TELNYX_PHONE_NUMBER`, `TELNYX_MESSAGING_SENDER_ID`, `TELNYX_CONNECTION_ID`, `TELNYX_MESSAGING_PROFILE_ID`, and `PUBLIC_WEBHOOK_BASE_URL`. For India-bound SMS, `TELNYX_MESSAGING_SENDER_ID` must match the approved/default alphanumeric sender configured on the Telnyx Messaging Profile.
 
 ## Tailscale Funnel
 

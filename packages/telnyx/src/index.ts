@@ -59,7 +59,9 @@ export async function speakText(config: AppConfig, callControlId: string, input:
 
 // Sends an SMS through the configured Telnyx messaging profile.
 export async function sendSms(config: AppConfig, input: TelnyxMessageInput): Promise<Record<string, unknown>> {
-  return telnyxRequest(config, '/messages', { from: config.TELNYX_PHONE_NUMBER, to: input.to, text: input.text, messaging_profile_id: config.TELNYX_MESSAGING_PROFILE_ID });
+  const sender = config.TELNYX_MESSAGING_SENDER_ID || config.TELNYX_PHONE_NUMBER;
+  if (!sender) throw new Error('Telnyx SMS sender is missing. Set TELNYX_MESSAGING_SENDER_ID in .env.');
+  return telnyxRequest(config, '/messages', { from: sender, to: input.to, text: input.text, messaging_profile_id: config.TELNYX_MESSAGING_PROFILE_ID });
 }
 
 // Verifies a Telnyx v2 webhook signature over its timestamp and raw JSON body.

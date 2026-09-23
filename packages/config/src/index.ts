@@ -21,6 +21,7 @@ const environmentSchema = z.object({
   TELNYX_API_KEY: z.string().optional().or(z.literal('')),
   TELNYX_PUBLIC_KEY: z.string().optional().or(z.literal('')),
   TELNYX_PHONE_NUMBER: z.string().optional().or(z.literal('')),
+  TELNYX_MESSAGING_SENDER_ID: z.string().optional().or(z.literal('')),
   TELNYX_CONNECTION_ID: z.string().optional().or(z.literal('')),
   TELNYX_MESSAGING_PROFILE_ID: z.string().optional().or(z.literal('')),
   SMTP_HOST: z.string().min(1),

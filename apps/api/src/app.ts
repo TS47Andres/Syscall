@@ -105,7 +105,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
 
   app.post('/api/auth/forgot-password', async (request, reply) => {
     const body = z.object({ phone: z.string() }).parse(request.body); const phoneE164 = toPhoneE164(body.phone); const user = await User.findOne({ phoneE164 });
-    if (user) { const token = cryptoRandomToken(); await import('@syscall/db').then(({ ResetToken }) => ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) })); await queueSms(context, { phoneE164, body: `Reset your PhoneMail password: ${config.PUBLIC_WEBHOOK_BASE_URL || 'http://localhost:3000'}/reset-password?token=${token}` }); await audit('password_reset_requested', user._id); }
+    if (user) { const token = cryptoRandomToken(); await import('@syscall/db').then(({ ResetToken }) => ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) })); await queueSms(context, { phoneE164, body: `Reset your Syscall password: ${config.PUBLIC_WEBHOOK_BASE_URL || 'http://localhost:3000'}/reset-password?token=${token}` }); await audit('password_reset_requested', user._id); }
     return reply.code(202).send({ status: 'accepted' });
   });
 
@@ -158,25 +158,31 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
 
   // Applies the small outbound IVR state machine to an answered call or DTMF event.
   async function processVoiceEvent(serviceContext: ServiceContext, eventType: string, payload: Record<string, unknown>): Promise<void> {
+    const mainMenuPrompt = 'Welcome to Syscall. Press 1 to create your account, press 2 to reset your password, or press 9 to repeat this menu.';
     const phone = typeof payload.to === 'string' ? payload.to : typeof payload.from === 'string' ? payload.from : null;
     const callControlId = typeof payload.call_control_id === 'string' ? payload.call_control_id : null;
     const digit = typeof payload.digit === 'string' ? payload.digit : typeof payload.digits === 'string' ? payload.digits : null;
     if (!phone) return;
     if (eventType === 'call.answered' && callControlId) {
-      await gatherUsingSpeak(serviceContext.config, callControlId, { payload: 'Welcome to Syscall. Press 1 to create your account, or press 2 to reset your password.' });
+      await gatherUsingSpeak(serviceContext.config, callControlId, { payload: mainMenuPrompt });
       logger.info({ eventType }, 'Outbound call answered; IVR prompt started');
+    }
+    if (eventType === 'call.dtmf.received' && digit === '9' && callControlId) {
+      await gatherUsingSpeak(serviceContext.config, callControlId, { payload: mainMenuPrompt });
+      logger.info({ eventType, digit }, 'Repeated IVR main menu');
+      return;
     }
     if (eventType === 'call.dtmf.received' && digit === '1') {
       const result = await ensureUserForPhone(serviceContext.config, phone);
       await audit('ivr_account_creation_attempt', result.user._id, [], { created: result.created });
       if (callControlId) await speakText(serviceContext.config, callControlId, { payload: result.created ? 'Your Syscall account has been created successfully.' : 'A Syscall account already exists for this number.' });
       logger.info({ eventType, digit, created: result.created }, 'Processed account creation selection');
-      if (result.created) { await audit('account_created', result.user._id, [result.user.publicId]); await queueSms(serviceContext, { phoneE164: result.user.phoneE164, body: `Your PhoneMail account ${result.user.emailAddress} has been created.` }); }
+      if (result.created) { await audit('account_created', result.user._id, [result.user.publicId]); await queueSms(serviceContext, { phoneE164: result.user.phoneE164, body: `Your Syscall account ${result.user.emailAddress} has been created.` }); }
     }
     if (eventType === 'call.dtmf.received' && digit === '2') {
       const user = await User.findOne({ phoneE164: toPhoneE164(phone) });
       if (callControlId) await speakText(serviceContext.config, callControlId, { payload: user ? 'Password reset instructions are being sent by SMS.' : 'No Syscall account was found for this number.' });
-      if (user) { const token = cryptoRandomToken(); const { ResetToken } = await import('@syscall/db'); await ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + serviceContext.config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) }); await queueSms(serviceContext, { phoneE164: user.phoneE164, body: `Reset your PhoneMail password: ${serviceContext.config.PUBLIC_WEBHOOK_BASE_URL}/reset-password?token=${token}` }); }
+      if (user) { const token = cryptoRandomToken(); const { ResetToken } = await import('@syscall/db'); await ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + serviceContext.config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) }); await queueSms(serviceContext, { phoneE164: user.phoneE164, body: `Reset your Syscall password: ${serviceContext.config.PUBLIC_WEBHOOK_BASE_URL}/reset-password?token=${token}` }); }
     }
   }
 

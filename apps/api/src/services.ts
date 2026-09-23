@@ -84,7 +84,7 @@ export async function requestOtp(context: ServiceContext, phone: string): Promis
   const otp = crypto.randomInt(100000, 1000000).toString();
   await context.redis.set(`otp:value:${phoneE164}`, JSON.stringify({ hash: hashSecret(otp), expiresAt: Date.now() + context.config.OTP_EXPIRY_MINUTES * 60 * 1000 }), 'EX', context.config.OTP_EXPIRY_MINUTES * 60);
   await context.redis.set(cooldownKey, '1', 'EX', context.config.OTP_RESEND_COOLDOWN_SECONDS);
-  await context.smsQueue.add('otp', { phoneE164, body: `Your PhoneMail verification code is ${otp}. It expires in ${context.config.OTP_EXPIRY_MINUTES} minutes.` });
+  await context.smsQueue.add('otp', { phoneE164, body: `Your Syscall verification code is ${otp}. It expires in ${context.config.OTP_EXPIRY_MINUTES} minutes.` });
   await audit('otp_sent', null, [], { phone10Digit: toPhone10(phoneE164) });
 }
 

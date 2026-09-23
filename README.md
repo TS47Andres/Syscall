@@ -1,6 +1,6 @@
 # Syscall
 
-Syscall is a production-style local backend foundation for the PhoneMail hackathon concept: Indian phone numbers become local-only identities such as `9876543210@niti`.
+Syscall is a production-style local backend foundation for a phone-addressed mail concept: Indian phone numbers become local-only identities such as `9876543210@niti`.
 
 ## Architecture
 

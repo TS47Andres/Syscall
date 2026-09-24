@@ -264,7 +264,7 @@ Response `200`:
 
 This confirms Telnyx accepted the call request; it does not confirm that the person answered, the media stream connected, or the conversation completed. There is no public call-status endpoint or call-history endpoint currently. Missing voice-agent token or public HTTPS URL returns `503`; invalid phone returns `400`. Telnyx credentials are also required for the provider request to succeed. This endpoint currently has no session authentication or call-rate limit in its route handler, so the frontend must only expose it as an explicit, protected product action; frontend checks alone are not an adequate abuse-control mechanism for a public deployment.
 
-During the live call, the assistant can request account creation (with confirmation) or request a password-reset SMS. Keypad options: `1` starts/confirms account creation, `2` requests reset instructions, and `9` cancels a pending creation or repeats the main prompt. The opening prompt is English/Hindi and asks the caller to speak their preferred language. Supported Sarvam voice locales are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia; selected language is intended to remain fixed for the call.
+During the live call, the assistant carries on a natural conversation and can invoke account creation or request a password-reset SMS when the caller asks. A clear account-creation request directly invokes the creation action without a separate confirmation turn. There is no IVR/keypad menu or DTMF-triggered action. The opening prompt is English/Hindi and asks the caller to speak their preferred language. Supported Sarvam voice locales are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia; response language and TTS voice are selected per caller turn, so the caller may switch languages during a call.
 
 ## 5. Mail endpoints
 
@@ -485,13 +485,13 @@ Request: `{ "callControlId": "<id>" }`. Deletes API-side authorization for the a
 
 - `GET http://localhost:4000/health` returns `{ "status": "ok", "service": "voice-agent" }`; port 4000 binds to host loopback in Compose.
 - `GET /voice-stream?ticket=<one-time-ticket>` is a WebSocket upgrade path, not an HTTP frontend API. The ticket is short-lived and one-use. Only Telnyx should receive it.
-- Telnyx media uses bidirectional 8 kHz mono PCMU frames. The agent starts Sarvam realtime STT, returns synthesized PCMU audio, handles barge-in, and processes DTMF `1`, `2`, and `9`.
+- Telnyx media uses bidirectional 8 kHz mono PCMU frames. The agent starts Sarvam realtime STT, returns synthesized PCMU audio, and handles barge-in. DTMF is not used for application actions; callers interact with the assistant conversationally.
 
 ## 8. Suggested frontend flows
 
 ### New account
 
-There is no public account-creation endpoint. Current supported path: the user initiates/answers a voice call to the phone and explicitly confirms creation in the assistant flow. Upon success, the backend creates the user's `@niti` identity and queues an SMS. The frontend can then use OTP request/verify or password login to authenticate. Do not fabricate a registration endpoint or create an account by calling `/internal/voice/actions`.
+There is no public account-creation endpoint. Current supported path: the user initiates/answers a voice call and asks the conversational assistant to create an account; a clear request invokes the internal action directly without keypad input or a second confirmation. Upon success, the backend creates the user's `@niti` identity and queues an SMS. The frontend can then use OTP request/verify or password login to authenticate. Do not fabricate a registration endpoint or create an account by calling `/internal/voice/actions`.
 
 ### Existing account first sign-in
 

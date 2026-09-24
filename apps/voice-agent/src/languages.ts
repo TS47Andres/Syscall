@@ -50,8 +50,8 @@ export function voiceLanguageFor(code: string | undefined): VoiceLanguage | null
 
 export const VOICE_LANGUAGE_CODES = Object.freeze(Object.keys(VOICE_LANGUAGES));
 
-export const INITIAL_GREETING = 'Welcome to Syscall. Please say a few words in the language you prefer, and I will continue in that language. You may also press 1 to create an account, 2 for password reset, or 9 to repeat this message. नमस्ते, Syscall में आपका स्वागत है। आप जिस भाषा में बात करना चाहते हैं, कृपया उसमें कुछ शब्द बोलें। मैं उसी भाषा में बात करूँगा। खाता बनाने के लिए 1, पासवर्ड रीसेट के लिए 2, या यह संदेश दोबारा सुनने के लिए 9 दबाएँ।';
+export const INITIAL_GREETING = 'Welcome to Syscall. Tell me what you need help with in the language you prefer. नमस्ते, Syscall में आपका स्वागत है। कृपया अपनी पसंद की भाषा में बताएं कि मैं आपकी कैसे मदद करूँ।';
 
-export const UNSUPPORTED_LANGUAGE_FALLBACK = 'Sorry, I cannot speak that language yet. Please continue in English or Hindi, or press 1 to create an account, 2 for password reset, or 9 to repeat the welcome message. माफ़ कीजिए, मैं अभी इस भाषा में बात नहीं कर सकता। कृपया अंग्रेज़ी या हिंदी में बोलें, या खाता बनाने के लिए 1, पासवर्ड रीसेट के लिए 2, या संदेश दोहराने के लिए 9 दबाएँ।';
+export const UNSUPPORTED_LANGUAGE_FALLBACK = 'I may not be able to speak that language yet. Please try English or Hindi, or tell me what you need help with. माफ़ कीजिए, मैं अभी यह भाषा नहीं बोल सकता। कृपया अंग्रेज़ी या हिंदी में बोलें।';
 
-export const UNCERTAIN_LANGUAGE_FALLBACK = 'I could not identify the language clearly. Please say a short sentence again in English or Hindi, or press 1 to create an account, 2 for password reset, or 9 to repeat the welcome message. मैं भाषा पहचान नहीं पाया। कृपया अंग्रेज़ी या हिंदी में फिर से एक छोटा वाक्य बोलें, या खाता बनाने के लिए 1, पासवर्ड रीसेट के लिए 2, या संदेश दोहराने के लिए 9 दबाएँ।';
+export const UNCERTAIN_LANGUAGE_FALLBACK = 'I could not identify the language clearly. Please say a short sentence again in English or Hindi. मैं भाषा स्पष्ट रूप से नहीं पहचान पाया। कृपया अंग्रेज़ी या हिंदी में एक छोटा वाक्य फिर से बोलें।';

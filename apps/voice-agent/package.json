@@ -1,0 +1,12 @@
+{
+  "name": "@syscall/voice-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "voice-agent": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

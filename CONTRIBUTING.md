@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Syscall is a local-only, containerized backend for PhoneMail-style phone-based email identities. Contributions must preserve the service boundaries, security invariants, and explicit-failure behavior described in the project brief.
+Syscall is a local-only, containerized backend for phone-addressed mail identities. Contributions must preserve the service boundaries, security invariants, and explicit-failure behavior described in the project brief.
 
 ## Required source-file header
 
@@ -51,7 +51,7 @@ Example:
 
 ## Testing policy
 
-Create tests only when they materially protect security-sensitive or domain-critical behavior, such as password rules, OTP limits, IVR transitions, SMTP validation, attachment validation, delete/purge semantics, or webhook idempotency. Do not add placeholder or trivial tests.
+Create tests only when they materially protect security-sensitive or domain-critical behavior, such as password rules, OTP limits, voice-action confirmation, SMTP validation, attachment validation, delete/purge semantics, or webhook idempotency. Do not add placeholder or trivial tests.
 
 ## Change checklist
 

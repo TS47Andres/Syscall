@@ -2,12 +2,16 @@
   "name": "syscall",
   "private": true,
   "version": "0.1.0",
-  "description": "Syscall local PhoneMail backend foundation",
-  "workspaces": ["apps/*", "packages/*"],
+  "description": "Syscall containerized phone-addressed mail backend",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "api": "tsx apps/api/src/index.ts",
     "smtp": "tsx apps/smtp/src/index.ts",
     "worker": "tsx apps/worker/src/index.ts",
+    "voice-agent": "npm run voice-agent --workspace apps/voice-agent",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "status": "tsx scripts/status.ts",
@@ -35,6 +39,7 @@
     "@types/node": "^22.10.7",
     "@types/nodemailer": "^6.4.16",
     "@types/smtp-server": "^3.5.10",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",
     "vitest": "^3.0.5"

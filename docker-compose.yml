@@ -43,7 +43,7 @@ services:
       ATTACHMENT_STORAGE_PATH: /var/lib/syscall/attachments
       RAW_MAIL_STORAGE_PATH: /var/lib/syscall/raw-mail
     ports:
-      - "${API_PORT:-3000}:3000"
+      - "127.0.0.1:${API_PORT:-3000}:3000"
     volumes:
       - mail-storage:/var/lib/syscall
     depends_on:
@@ -57,6 +57,29 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  voice-agent:
+    profiles: ["voice"]
+    build:
+      context: .
+      dockerfile: docker/voice-agent/Dockerfile
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      API_INTERNAL_URL: http://api:3000
+      VOICE_AGENT_PORT: 4000
+    ports:
+      - "127.0.0.1:${VOICE_AGENT_PORT:-4000}:4000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12

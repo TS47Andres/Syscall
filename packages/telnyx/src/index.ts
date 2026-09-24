@@ -6,10 +6,8 @@
 import crypto from 'node:crypto';
 import type { AppConfig } from '@syscall/config';
 
-export interface TelnyxCallInput { phoneE164: string; webhookUrl: string; }
+export interface TelnyxCallInput { phoneE164: string; webhookUrl: string; streamUrl: string; }
 export interface TelnyxMessageInput { to: string; text: string; }
-export interface TelnyxGatherInput { payload: string; }
-export interface TelnyxSpeakInput { payload: string; }
 
 // Ensures provider-dependent actions explain exactly which integration is missing.
 function requireTelnyx(config: AppConfig): void {
@@ -20,40 +18,24 @@ function requireTelnyx(config: AppConfig): void {
 async function telnyxRequest(config: AppConfig, endpoint: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
   requireTelnyx(config);
   const response = await fetch(`https://api.telnyx.com/v2${endpoint}`, { method: 'POST', headers: { authorization: `Bearer ${config.TELNYX_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  if (!response.ok) throw new Error(`Telnyx request failed with HTTP ${response.status}: ${await response.text()}`);
+  if (!response.ok) throw new Error(`Telnyx request failed with HTTP ${response.status}.`);
   return await response.json() as Record<string, unknown>;
 }
 
-// Starts an outbound Telnyx call with a callback to the local IVR webhook.
+// Starts an outbound Telnyx call with signed event webhooks and bidirectional PCMU media.
 export async function startOutboundCall(config: AppConfig, input: TelnyxCallInput): Promise<Record<string, unknown>> {
-  return telnyxRequest(config, '/calls', { connection_id: config.TELNYX_CONNECTION_ID, to: input.phoneE164, from: config.TELNYX_PHONE_NUMBER, webhook_url: input.webhookUrl, webhook_url_method: 'POST', webhook_api_version: '2' });
-}
-
-// Speaks the initial IVR prompt and waits for one of the account-flow digits.
-export async function gatherUsingSpeak(config: AppConfig, callControlId: string, input: TelnyxGatherInput): Promise<Record<string, unknown>> {
-  return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/gather_using_speak`, {
-    payload: input.payload,
-    payload_type: 'text',
-    service_level: 'premium',
-    voice: 'AWS.Polly.Joanna-Neural',
-    language: 'en-US',
-    minimum_digits: 1,
-    maximum_digits: 1,
-    valid_digits: '129',
-    terminating_digit: '',
-    timeout_millis: 10000,
-    maximum_tries: 2,
-  });
-}
-
-// Speaks a result message after the caller selects an IVR option.
-export async function speakText(config: AppConfig, callControlId: string, input: TelnyxSpeakInput): Promise<Record<string, unknown>> {
-  return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/speak`, {
-    payload: input.payload,
-    payload_type: 'text',
-    service_level: 'premium',
-    voice: 'AWS.Polly.Joanna-Neural',
-    language: 'en-US',
+  return telnyxRequest(config, '/calls', {
+    connection_id: config.TELNYX_CONNECTION_ID,
+    to: input.phoneE164,
+    from: config.TELNYX_PHONE_NUMBER,
+    webhook_url: input.webhookUrl,
+    webhook_url_method: 'POST',
+    webhook_api_version: '2',
+    stream_url: input.streamUrl,
+    stream_track: 'inbound_track',
+    stream_codec: 'PCMU',
+    stream_bidirectional_mode: 'rtp',
+    stream_bidirectional_codec: 'PCMU',
   });
 }
 

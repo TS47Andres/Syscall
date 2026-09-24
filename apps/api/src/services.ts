@@ -42,6 +42,17 @@ export async function ensureUserForPhone(config: AppConfig, phone: string): Prom
   return { user, created: true };
 }
 
+// Sends password reset instructions without revealing account existence to a caller.
+export async function requestPasswordReset(context: ServiceContext, phone: string): Promise<void> {
+  const phoneE164 = toPhoneE164(phone);
+  const user = await User.findOne({ phoneE164 });
+  if (!user) return;
+  const token = crypto.randomBytes(32).toString('base64url');
+  await ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + context.config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) });
+  await queueSms(context, { phoneE164: user.phoneE164, body: `Reset your Syscall password: ${context.config.PUBLIC_WEBHOOK_BASE_URL || 'http://localhost:3000'}/reset-password?token=${token}` });
+  await audit('password_reset_requested', user._id);
+}
+
 // Creates a secure Redis-backed session and returns its opaque token.
 export async function createSession(context: ServiceContext, user: UserDocument): Promise<string> {
   const token = crypto.randomBytes(32).toString('base64url');

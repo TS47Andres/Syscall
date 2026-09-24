@@ -1,5 +1,7 @@
+# File: tailscale-funnel.ps1
+# Role: Publishes only Telnyx webhook and voice-media routes through Tailscale Funnel.
+# Service: Syscall deployment helper.
 param(
-  [switch]$Background,
   [switch]$Status,
   [switch]$Reset
 )
@@ -26,21 +28,35 @@ if ($Status) {
 }
 
 $apiPort = if ($env:API_PORT) { [int]$env:API_PORT } else { 3000 }
+$voiceAgentPort = if ($env:VOICE_AGENT_PORT) { [int]$env:VOICE_AGENT_PORT } else { 4000 }
 $healthUrl = "http://127.0.0.1:$apiPort/health"
+$voiceHealthUrl = "http://127.0.0.1:$voiceAgentPort/health"
 
 try {
   $health = Invoke-WebRequest -UseBasicParsing -Uri $healthUrl -TimeoutSec 5
   if ($health.StatusCode -ne 200) { throw "API health check returned HTTP $($health.StatusCode)." }
 } catch {
-  throw "Syscall API is not healthy at $healthUrl. Start it with 'docker compose up -d --build' before enabling Funnel. Details: $($_.Exception.Message)"
+  throw "Syscall API is not healthy at $healthUrl. Start it with 'docker compose up -d --build' first. Details: $($_.Exception.Message)"
 }
 
-Write-Host "Exposing only /webhooks/telnyx/ through Tailscale Funnel on API port $apiPort."
-Write-Host 'Copy the https://*.ts.net hostname printed by Tailscale into PUBLIC_WEBHOOK_BASE_URL in .env.'
-Write-Host 'The Telnyx webhook URLs will be /webhooks/telnyx/voice and /webhooks/telnyx/sms.'
+try {
+  $voiceHealth = Invoke-WebRequest -UseBasicParsing -Uri $voiceHealthUrl -TimeoutSec 5
+  if ($voiceHealth.StatusCode -ne 200) { throw "Voice agent health check returned HTTP $($voiceHealth.StatusCode)." }
+} catch {
+  throw "Syscall voice agent is not healthy at $voiceHealthUrl. Start it with 'docker compose --profile voice up -d --build' after configuring SARVAM_API_KEY and VOICE_AGENT_API_TOKEN. Details: $($_.Exception.Message)"
+}
 
-$arguments = @('--set-path', '/webhooks/telnyx/')
-if ($Background) { $arguments += '--bg' }
-$arguments += "http://127.0.0.1:$apiPort/webhooks/telnyx/"
-& $tailscalePath funnel @arguments
+Write-Host 'Publishing only the Telnyx webhook paths and /voice-stream through Tailscale Funnel.'
+Write-Host 'The host-side API port is loopback-only; MongoDB, Redis, SMTP, and ClamAV remain private.'
+Write-Host 'Copy the https://*.ts.net hostname printed by Tailscale into PUBLIC_WEBHOOK_BASE_URL in .env.'
+
+$webhookArguments = @('--bg', '--https=443', '--set-path=/webhooks/telnyx/', "http://127.0.0.1:$apiPort/webhooks/telnyx/")
+& $tailscalePath funnel @webhookArguments
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$voiceArguments = @('--bg', '--https=443', '--set-path=/voice-stream', "http://127.0.0.1:$voiceAgentPort/voice-stream")
+& $tailscalePath funnel @voiceArguments
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $tailscalePath funnel status
 exit $LASTEXITCODE

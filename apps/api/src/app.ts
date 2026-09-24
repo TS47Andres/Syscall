@@ -11,13 +11,13 @@ import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import { AuditLog, Draft, Email, User, WebhookEvent, pingDatabase, type UserDocument } from '@syscall/db';
 import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue } from '@syscall/queues';
-import { gatherUsingSpeak, speakText, startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
+import { startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
 import { isTelnyxConfigured } from '@syscall/config';
 import { toPhoneE164, addressSchema, passwordSchema, phoneSchema } from '@syscall/validation';
 import { scanWithClamAv } from '@syscall/mail';
 import type { AppConfig } from '@syscall/config';
 import { createLogger } from '@syscall/logging';
-import { audit, createSession, ensureUserForPhone, hashPassword, hashSecret, persistAttachments, purgeEmail, queueEmail, queueSms, requestOtp, resolveSession, revokeAllSessions, revokeSession, verifyOtp, type ServiceContext } from './services.js';
+import { audit, createSession, ensureUserForPhone, hashPassword, hashSecret, persistAttachments, purgeEmail, queueEmail, queueSms, requestOtp, requestPasswordReset, resolveSession, revokeAllSessions, revokeSession, verifyOtp, type ServiceContext } from './services.js';
 
 // Builds the Fastify application with all shared dependencies explicitly provided.
 export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: FastifyInstance; context: ServiceContext }> {
@@ -104,8 +104,8 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   app.post('/api/auth/logout-all', async (request) => { const user = await requireUser(request); await revokeAllSessions(user); await audit('session_revoked', user._id); return { status: 'logged-out-all' }; });
 
   app.post('/api/auth/forgot-password', async (request, reply) => {
-    const body = z.object({ phone: z.string() }).parse(request.body); const phoneE164 = toPhoneE164(body.phone); const user = await User.findOne({ phoneE164 });
-    if (user) { const token = cryptoRandomToken(); await import('@syscall/db').then(({ ResetToken }) => ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) })); await queueSms(context, { phoneE164, body: `Reset your Syscall password: ${config.PUBLIC_WEBHOOK_BASE_URL || 'http://localhost:3000'}/reset-password?token=${token}` }); await audit('password_reset_requested', user._id); }
+    const body = z.object({ phone: z.string() }).parse(request.body);
+    await requestPasswordReset(context, body.phone);
     return reply.code(202).send({ status: 'accepted' });
   });
 
@@ -118,7 +118,101 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     return { status: 'password-reset' };
   });
 
-  app.post('/calls/start', async (request) => { const body = z.object({ phone: phoneSchema }).parse(request.body); const result = await startOutboundCall(config, { phoneE164: body.phone, webhookUrl: webhookUrl(config, 'voice') }); await audit('outbound_call_triggered', null, [], { phone10Digit: body.phone.slice(3) }); return { status: 'started', provider: result }; });
+  app.post('/calls/start', async (request) => {
+    const body = z.object({ phone: phoneSchema }).parse(request.body);
+    if (!config.VOICE_AGENT_API_TOKEN) throw httpError(503, 'Voice assistant is not configured.');
+    if (!config.PUBLIC_WEBHOOK_BASE_URL) throw httpError(503, 'Public voice URL is not configured.');
+    const streamTicket = cryptoRandomToken();
+    const ticketHash = hashSecret(streamTicket);
+    const ticketKey = `voice:stream-ticket:${ticketHash}`;
+    await redis.set(ticketKey, JSON.stringify({ phoneE164: body.phone }), 'EX', 300);
+    try {
+      const streamBase = new URL(config.PUBLIC_WEBHOOK_BASE_URL);
+      if (streamBase.protocol !== 'https:') throw httpError(503, 'Public voice URL must use HTTPS.');
+      streamBase.protocol = 'wss:';
+      streamBase.pathname = `${streamBase.pathname.replace(/\/$/, '')}/voice-stream`;
+      streamBase.search = '';
+      streamBase.hash = '';
+      streamBase.searchParams.set('ticket', streamTicket);
+      const streamUrl = streamBase.toString();
+      const result = await startOutboundCall(config, { phoneE164: body.phone, webhookUrl: webhookUrl(config, 'voice'), streamUrl });
+      const callControlId = (result.data as Record<string, unknown> | undefined)?.call_control_id;
+      if (typeof callControlId !== 'string') throw new Error('Telnyx did not return a call control ID.');
+      await redis.set(`voice:call:${callControlId}`, JSON.stringify({ phoneE164: body.phone, createdAt: Date.now() }), 'EX', 21600);
+      await audit('outbound_call_triggered', null, [], { phone10Digit: body.phone.slice(3) });
+      return { status: 'started', callControlId };
+    } catch (error) {
+      await redis.del(ticketKey);
+      throw error;
+    }
+  });
+
+  // Binds a one-time stream ticket to the call announced on the authenticated Telnyx media stream.
+  app.post('/internal/voice/sessions/activate', async (request) => {
+    requireVoiceAgent(request);
+    const body = z.object({ ticket: z.string().min(32), callControlId: z.string().min(10), phone: phoneSchema }).parse(request.body);
+    const ticketKey = `voice:stream-ticket:${hashSecret(body.ticket)}`;
+    const ticket = await redis.getdel(ticketKey);
+    if (!ticket) throw httpError(401, 'Voice stream ticket is invalid or expired.');
+    const ticketData = JSON.parse(ticket) as { phoneE164: string };
+    const phoneE164 = toPhoneE164(body.phone);
+    if (ticketData.phoneE164 !== phoneE164) throw httpError(401, 'Voice stream did not match the requested call.');
+    const callKey = `voice:call:${body.callControlId}`;
+    const call = await redis.get(callKey);
+    if (!call || (JSON.parse(call) as { phoneE164: string }).phoneE164 !== phoneE164) throw httpError(401, 'Voice call is not active.');
+    return { status: 'active' };
+  });
+
+  // Executes only the two narrow actions available to a verified voice call.
+  app.post('/internal/voice/actions', async (request) => {
+    requireVoiceAgent(request);
+    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['create_account', 'request_password_reset']) }).parse(request.body);
+    const call = await redis.get(`voice:call:${body.callControlId}`);
+    if (!call) throw httpError(401, 'Voice call is not active.');
+    const { phoneE164 } = JSON.parse(call) as { phoneE164: string };
+    const actionKey = `voice:action:${body.callControlId}:${body.actionId}`;
+    const claimed = await redis.set(actionKey, 'processing', 'EX', 3600, 'NX');
+    if (!claimed) {
+      const cached = await redis.get(actionKey);
+      if (cached && cached !== 'processing') return JSON.parse(cached) as Record<string, unknown>;
+      throw httpError(409, 'This voice action is already being processed.');
+    }
+    try {
+      let result: Record<string, unknown>;
+      if (body.action === 'create_account') {
+        const created = await ensureUserForPhone(config, phoneE164);
+        await audit('voice_account_creation_attempt', created.user._id, [], { created: created.created });
+        if (created.created) {
+          await audit('account_created', created.user._id, [created.user.publicId]);
+          await queueSms(context, { phoneE164: created.user.phoneE164, body: `Your Syscall account ${created.user.emailAddress} has been created.` });
+        }
+        result = { action: body.action, created: created.created, emailAddress: created.user.emailAddress };
+      } else {
+        await requestPasswordReset(context, phoneE164);
+        result = { action: body.action, accepted: true };
+      }
+      await redis.set(actionKey, JSON.stringify(result), 'EX', 3600);
+      return result;
+    } catch (error) {
+      await redis.del(actionKey);
+      throw error;
+    }
+  });
+
+  app.post('/internal/voice/sessions/close', async (request) => {
+    requireVoiceAgent(request);
+    const body = z.object({ callControlId: z.string().min(10) }).parse(request.body);
+    await redis.del(`voice:call:${body.callControlId}`);
+    return { status: 'closed' };
+  });
+
+  // Authenticates voice-agent-only internal routes using a constant-time token comparison.
+  function requireVoiceAgent(request: FastifyRequest): void {
+    const value = request.headers['x-syscall-voice-token'];
+    const presented = Array.isArray(value) ? value[0] : value;
+    const expected = config.VOICE_AGENT_API_TOKEN;
+    if (!expected || !presented || expected.length !== presented.length || !crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(presented))) throw httpError(401, 'Voice agent authentication failed.');
+  }
 
   app.post('/api/mail/send', async (request, reply) => {
     const user = await requireUser(request); if (!user.passwordConfigured) throw httpError(403, 'Set a password before using mail.');
@@ -152,38 +246,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     if (!verifyWebhookSignature(config, rawBody, signatureValue, timestampValue)) throw httpError(401, 'Invalid Telnyx webhook signature.');
     const event = request.body as { data?: { id?: string; event_type?: string; payload?: Record<string, unknown> } }; const eventId = event.data?.id; if (!eventId) return { received: true };
     try { await WebhookEvent.create({ providerEventId: eventId, eventType: event.data?.event_type ?? kind }); } catch (error) { if ((error as { code?: number }).code === 11000) return { received: true, duplicate: true }; throw error; }
-    if (kind === 'voice') await processVoiceEvent(context, event.data?.event_type ?? '', event.data?.payload ?? {});
     return { received: true };
-  }
-
-  // Applies the small outbound IVR state machine to an answered call or DTMF event.
-  async function processVoiceEvent(serviceContext: ServiceContext, eventType: string, payload: Record<string, unknown>): Promise<void> {
-    const mainMenuPrompt = 'Welcome to Syscall. Press 1 to create your account, press 2 to reset your password, or press 9 to repeat this menu.';
-    const phone = typeof payload.to === 'string' ? payload.to : typeof payload.from === 'string' ? payload.from : null;
-    const callControlId = typeof payload.call_control_id === 'string' ? payload.call_control_id : null;
-    const digit = typeof payload.digit === 'string' ? payload.digit : typeof payload.digits === 'string' ? payload.digits : null;
-    if (!phone) return;
-    if (eventType === 'call.answered' && callControlId) {
-      await gatherUsingSpeak(serviceContext.config, callControlId, { payload: mainMenuPrompt });
-      logger.info({ eventType }, 'Outbound call answered; IVR prompt started');
-    }
-    if (eventType === 'call.dtmf.received' && digit === '9' && callControlId) {
-      await gatherUsingSpeak(serviceContext.config, callControlId, { payload: mainMenuPrompt });
-      logger.info({ eventType, digit }, 'Repeated IVR main menu');
-      return;
-    }
-    if (eventType === 'call.dtmf.received' && digit === '1') {
-      const result = await ensureUserForPhone(serviceContext.config, phone);
-      await audit('ivr_account_creation_attempt', result.user._id, [], { created: result.created });
-      if (callControlId) await speakText(serviceContext.config, callControlId, { payload: result.created ? 'Your Syscall account has been created successfully.' : 'A Syscall account already exists for this number.' });
-      logger.info({ eventType, digit, created: result.created }, 'Processed account creation selection');
-      if (result.created) { await audit('account_created', result.user._id, [result.user.publicId]); await queueSms(serviceContext, { phoneE164: result.user.phoneE164, body: `Your Syscall account ${result.user.emailAddress} has been created.` }); }
-    }
-    if (eventType === 'call.dtmf.received' && digit === '2') {
-      const user = await User.findOne({ phoneE164: toPhoneE164(phone) });
-      if (callControlId) await speakText(serviceContext.config, callControlId, { payload: user ? 'Password reset instructions are being sent by SMS.' : 'No Syscall account was found for this number.' });
-      if (user) { const token = cryptoRandomToken(); const { ResetToken } = await import('@syscall/db'); await ResetToken.create({ userId: user._id, tokenHash: hashSecret(token), expiresAt: new Date(Date.now() + serviceContext.config.PASSWORD_RESET_EXPIRY_HOURS * 60 * 60 * 1000) }); await queueSms(serviceContext, { phoneE164: user.phoneE164, body: `Reset your Syscall password: ${serviceContext.config.PUBLIC_WEBHOOK_BASE_URL}/reset-password?token=${token}` }); }
-    }
   }
 
   // Creates a reset token with enough entropy for a one-time link.

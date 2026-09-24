@@ -2,30 +2,31 @@
 
 ## Summary
 
-Syscall is a local-only, single-recipient/single-sender PhoneMail mail system. The API owns synchronous HTTP workflows and domain orchestration; the SMTP service owns SMTP protocol handling and security gates; the worker owns durable asynchronous delivery and delayed unread notifications. MongoDB is the source of truth for users, mail, drafts, audit records, and webhook idempotency. Redis stores sessions and BullMQ state. Raw MIME and generated attachment files live on the shared mail-storage volume. Tailscale Funnel is an optional host-side ingress that publishes only the Telnyx webhook path for end-to-end testing; data services and SMTP remain private.
+Syscall is a containerized, single-recipient/single-sender phone-addressed mail system. The API owns synchronous HTTP workflows and domain orchestration; SMTP owns protocol handling and security gates; the worker owns durable asynchronous delivery and delayed unread notifications. MongoDB is the source of truth for users, mail, drafts, audit records, and webhook idempotency. Redis stores sessions, BullMQ state, and short-lived voice-call authorization. Raw MIME and generated attachment files live on the shared mail-storage volume. Optional Tailscale Funnel ingress publishes only Telnyx webhook paths and the voice media WebSocket path.
 
-## Proposed tree
+## Service boundaries
 
 ```text
-apps/api/       Fastify HTTP API, auth, mail, drafts, calls, Telnyx webhooks
-apps/smtp/      smtp-server listener, MIME parsing, ClamAV scanning, message storage
-apps/worker/    BullMQ consumers for SMTP delivery and unread SMS notifications
+apps/api/       Fastify HTTP API, auth, mail, calls, Telnyx webhooks
+apps/voice-agent/ Telnyx media WebSocket, Sarvam speech/chat, call-scoped actions
+apps/smtp/      SMTP listener, MIME parsing, ClamAV scanning, message storage
+apps/worker/    BullMQ consumers for mail delivery and unread SMS notifications
 packages/config Shared typed environment validation
-packages/db    Mongoose connection and models
-packages/domain Phone, address, auth, IVR, and mail rules
+packages/db     Mongoose connection and models
+packages/domain Phone, address, auth, and mail rules
 packages/logging Structured logging helpers
 packages/mail   MIME, attachment, raw-file, and ClamAV helpers
 packages/queues BullMQ queue names and connection factory
 packages/telnyx Telnyx Voice/Messaging client and webhook verification
-docker/         service Dockerfiles and ClamAV configuration
-scripts/        local evaluation and status helpers
-storage/        local development mount points
+docker/         Service Dockerfiles and ClamAV configuration
+scripts/        Local evaluation and status helpers
+storage/        Local development mount points
 ```
 
 ## MongoDB schemas
 
 - `users`: public UUIDv7, normalized phone fields, derived address, Argon2id password hash, password state, account state, login/revocation timestamps.
-- `sessions`: not persisted in MongoDB; Redis keys contain hashed opaque session tokens and user/revocation metadata.
+- `sessions`: Redis keys contain hashed opaque session tokens and user/revocation metadata.
 - `otps`: phone-scoped hashed OTP, expiry, resend timestamp, failure count, and consumed timestamp.
 - `password_reset_tokens`: hashed single-use token, expiry, consumed timestamp, and user reference.
 - `emails`: public UUIDv7, sender/recipient references and addresses, parsed content, attachment metadata, raw MIME path, delivery/read/spam/delete state, and timestamps.
@@ -35,56 +36,48 @@ storage/        local development mount points
 
 Indexes cover phone/address uniqueness, email public IDs, inbox queries, draft ownership, token expiry lookups, audit timestamps, and webhook event IDs.
 
-## API contract summary
+## API contract
 
-Auth routes issue opaque 30-day Redis-backed sessions through an `X-Session-Token` response/header. OTP request/verify, password login/set, logout/logout-all, forgot/reset password are under `/api/auth`. Mail routes send, list, open, soft-delete, and toggle spam. Draft routes provide CRUD and draft send. `/calls/start` starts an outbound call. Telnyx voice and SMS webhooks are under `/webhooks/telnyx`. `/health` reports process liveness and `/ready` checks MongoDB, Redis, writable storage, and ClamAV.
+Auth routes issue opaque Redis-backed sessions through `X-Session-Token`. OTP request/verify, password login/set, logout/logout-all, and forgot/reset password are under `/api/auth`. Mail routes send, list, open, soft-delete, and toggle spam. Draft routes provide CRUD and draft send. `/calls/start` starts an outbound voice-agent call and returns a Telnyx call-control ID. Telnyx voice and SMS webhooks are under `/webhooks/telnyx`. Private API routes under `/internal/voice` require the shared `VOICE_AGENT_API_TOKEN` and accept only one-time session activation, call-scoped account/reset actions, and session closure. `/health` reports liveness; `/ready` checks API dependencies.
 
-## Sequence flows
+## Conversational call sequence
 
-### IVR account creation
+1. `/calls/start` stores a short-lived random stream ticket in Redis and asks Telnyx to call the normalized Indian number. The ticket is included only in the media-stream URL; Redis stores its hash and destination number.
+2. Tailscale Funnel routes `/voice-stream` to the loopback-bound voice-agent container and `/webhooks/telnyx/` to the API. The agent validates the ticket before accepting the WebSocket upgrade.
+3. Telnyx starts a bidirectional 8 kHz mono PCMU stream. The agent checks the call-control ID, called number, and codec, then consumes the one-time ticket through an authenticated API call.
+4. The agent opens Sarvam realtime STT with automatic language detection and plays a bilingual English/Hindi welcome prompt. A detected locale that maps to a supported voice (including Punjabi `pa-IN`) is selected and locked for the call; supported locales are not rejected based on confidence. Confidence gating applies only when the detected code is unknown or unmapped. Later STT language-ID changes cannot switch responses or speech synthesis to another language.
+5. Sarvam chat completion selects from a narrow tool set. Account creation requires a distinct caller confirmation turn; password reset sends generic SMS instructions. The API resolves the phone number from the active call record rather than trusting model-provided identity.
+6. Sarvam TTS returns 8 kHz mu-law audio, which the agent packetizes into 20 ms Telnyx media frames. Caller speech interrupts queued audio. Press `1` begins/confirms account creation, `2` requests reset SMS, and `9` cancels pending creation or repeats the greeting.
+7. When the Telnyx stream closes, the agent stops recognition/synthesis and removes the API-side call authorization.
 
-1. API calls Telnyx with a webhook callback URL and phone context.
-2. Voice webhook verifies signature, extracts event ID, and enqueues/executes the IVR transition.
-3. Option 1 normalizes the callee phone, checks `users`, and creates a user if absent.
-4. The service queues a confirmation SMS and returns a Telnyx speak/gather response.
+## Password reset
 
-### Forgot password
+1. API or agent supplies the normalized phone number.
+2. The service looks up the account, creates a random token, stores only its hash and configured expiry, and enqueues an SMS with a reset URL. The response does not reveal whether an account exists.
+3. `/api/auth/reset-password` validates a submitted token, sets an Argon2id password, consumes outstanding reset tokens, revokes sessions, and audits completion.
 
-1. API or IVR supplies the normalized phone.
-2. The service checks the user, creates a random token, stores only its hash and a two-hour expiry, and sends an SMS link.
-3. Reset validates the token, sets an Argon2id password, consumes all outstanding reset tokens, and revokes sessions.
+The backend endpoint exists; a separate user-facing reset page is not included in this backend repository and must be provided by a client before the SMS link can complete the workflow.
 
-### OTP login
+## OTP login
 
 1. Request validates phone and cooldown/rate limits, hashes a six-digit OTP, and sends it through the SMS queue.
 2. Verify compares the hash, enforces expiry and daily failure limits, creates a Redis session, and records first-login password setup state.
-3. Password set validates policy, hashes Argon2id, and clears the setup requirement.
+3. Password set validates policy, hashes with Argon2id, and clears the setup requirement.
 
-### Sending mail
+## Sending and receiving mail
 
-1. Authenticated API request derives `From` from the session user and validates the recipient.
+1. An authenticated API request derives `From` from the session user and validates the recipient.
 2. MongoDB stores an email with `queued` status before a BullMQ job is created.
 3. The worker builds MIME and sends it to the internal SMTP service through Nodemailer.
-4. SMTP validates both identities, parses/scans/stores the message, and the worker updates delivery state.
+4. SMTP validates identities, parses and scans attachments, stores accepted mail, and updates delivery state.
+5. A delayed unread job re-reads the email and queues an SMS only if it is still unread.
 
-### Receiving mail
+## Security and operational choices
 
-1. SMTP accepts only known `@niti` sender and recipient identities.
-2. MIME and attachments are validated and scanned; raw MIME/files use generated UUID paths.
-3. MongoDB stores the incoming email unread and a 60-second delayed unread check is queued.
-
-### Unread email SMS
-
-1. The delayed job re-reads the email.
-2. If `readAt` is still null, it queues an SMS containing sender, subject, and attachment count.
-3. If the email was opened, no SMS is sent.
-
-## Risks and explicit choices
-
-- Telnyx webhook signing keys and exact event schemas vary by account/API version. The adapter isolates provider details and rejects unverifiable webhooks.
-- SMTP itself is intentionally internal-only; API delivery uses the SMTP service name, never localhost.
-- ClamAV is a hard dependency for accepted mail. Unavailability returns SMTP 451.
-- MongoDB and Redis startup health does not prove Telnyx credentials exist. Telnyx actions fail clearly until configured.
-- This implementation uses a local filesystem volume for raw mail and attachments; multi-host object storage is out of scope.
-- Password setup after first OTP is enforced by a session flag; clients must call `/api/auth/password/set` before normal mail actions.
-- Purging a message preserves a minimal audit event while removing content and files.
+- Telnyx webhooks are signature-verified and event IDs are deduplicated.
+- Voice stream tickets are random, short-lived, one-time, and stored only as hashes. Internal agent routes require a configured shared secret; provider credentials never enter call prompts or logs.
+- Voice actions are limited to the caller number bound to a live Telnyx call. Account creation is explicitly confirmed; reset messaging is generic to prevent account enumeration.
+- Host ports for API and voice agent bind to loopback. Funnel publishes only required provider paths; MongoDB, Redis, SMTP, and ClamAV remain private.
+- SMTP is internal-only. ClamAV is a hard dependency for accepted mail; unavailability returns SMTP 451.
+- Raw mail/attachment storage uses generated paths on a local filesystem volume; multi-host object storage is out of scope.
+- Provider webhook schemas and voice quality depend on Telnyx account configuration and should be evaluated with controlled calls before production use.

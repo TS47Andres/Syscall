@@ -1,7 +1,13 @@
+/**
+ * File: MailPage.tsx
+ * Role: Filters backend mailbox records and routes mail actions to the context.
+ * Service: Frontend.
+ */
 import React, { useMemo, useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useMail } from '../context/MailContext';
 import type { Email } from '../types';
+import { api } from '../api';
 import { EmailList } from '../components/mail/EmailList';
 import { ReadingPane } from '../components/mail/ReadingPane';
 import {
@@ -26,12 +32,16 @@ export const MailPage: React.FC = () => {
     categoryTab,
     setCategoryTab,
     refreshing,
+    loadError,
     loadMail,
     handleMoveToBin,
     handleRestoreFromBin,
     handlePermanentDelete,
     handleEmptyBin,
     handleToggleStar,
+    handleToggleSpam,
+    handleCancelScheduled,
+    handleRescheduleScheduled,
     setIsComposeOpen,
     setComposePrefill,
   } = useMail();
@@ -69,6 +79,8 @@ export const MailPage: React.FC = () => {
 
       // Non-bin views: exclude binned emails
       if (isTrashed) return false;
+      if (mail.isDraft && folder !== 'drafts') return false;
+      if (mail.deliveryStatus === 'scheduled' && folder !== 'scheduled') return false;
 
       // Spam filtering
       if (folder === 'spam') {
@@ -87,9 +99,9 @@ export const MailPage: React.FC = () => {
       } else if (folder === 'sent') {
         if (!mail.senderAddress.includes(currentUser.phone)) return false;
       } else if (folder === 'scheduled') {
-        return false;
+        if (mail.deliveryStatus !== 'scheduled') return false;
       } else if (folder === 'drafts') {
-        return false;
+        if (!mail.isDraft) return false;
       } else if (folder === 'allmail') {
         // Shows all non-binned messages
       } else if (folder === 'purchases') {
@@ -101,6 +113,7 @@ export const MailPage: React.FC = () => {
       } else if (folder === 'updates') {
         if (!isUpdateMail(mail)) return false;
       } else if (folder === 'inbox') {
+        if (mail.recipientAddress !== currentUser.emailAddress) return false;
         if (categoryTab === 'promotions' && !isPromoMail(mail)) return false;
         if (categoryTab === 'social' && !isSocialMail(mail)) return false;
         if (categoryTab === 'updates') {
@@ -126,17 +139,24 @@ export const MailPage: React.FC = () => {
   }, [emails, mailId]);
 
   const handleSelectEmail = (mail: Email) => {
+    if (mail.isDraft) {
+      setComposePrefill({ to: mail.recipientAddress, subject: mail.subject, body: mail.textBody, draftId: mail.publicId, draftAttachments: mail.attachments });
+      setIsComposeOpen(true);
+      return;
+    }
     navigate(`/mail/${folder}/${mail.publicId}`);
+    if (!mail.isTrashed) void api.getEmail(mail.publicId).then(loadMail).catch((error: unknown) => window.alert(error instanceof Error ? error.message : 'Could not open this message.'));
   };
 
   const handleCloseReadingPane = () => {
     navigate(`/mail/${folder}`);
   };
 
-  const onReply = (to: string, subject: string) => {
+  const onReply = (to: string, subject: string, replyToId?: string) => {
     setComposePrefill({
       to,
-      subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+      subject: replyToId ? (subject.startsWith('Re:') ? subject : `Re: ${subject}`) : subject,
+      replyToId,
     });
     setIsComposeOpen(true);
   };
@@ -156,8 +176,19 @@ export const MailPage: React.FC = () => {
     navigate(`/mail/${folder}`);
   };
 
+  // Cancels the selected scheduled message and reports backend failures.
+  const onCancelScheduled = (id: string) => {
+    void handleCancelScheduled(id).catch((error: unknown) => window.alert(error instanceof Error ? error.message : 'Could not cancel scheduled email.'));
+  };
+
+  // Applies a newly selected delivery time to a pending scheduled message.
+  const onRescheduleScheduled = (id: string, scheduledAt: string) => {
+    void handleRescheduleScheduled(id, scheduledAt).catch((error: unknown) => window.alert(error instanceof Error ? error.message : 'Could not reschedule email.'));
+  };
+
   return (
     <main style={styles.workspaceContainer}>
+      {loadError && <div role="alert" style={styles.errorBanner}>{loadError}</div>}
       {/* Email List View */}
       <EmailList
         emails={filteredEmails}
@@ -185,6 +216,11 @@ export const MailPage: React.FC = () => {
           onRestoreFromBin={onRestoreFromPane}
           onPermanentDelete={onPermanentDeleteFromPane}
           onReply={onReply}
+          userAddress={currentUser.emailAddress}
+          onCancelScheduled={onCancelScheduled}
+          onRescheduleScheduled={onRescheduleScheduled}
+          canReportSpam={selectedEmail.recipientAddress === currentUser.emailAddress && !selectedEmail.isDraft}
+          onToggleSpam={(id, spam) => handleToggleSpam(id, spam)}
         />
       )}
     </main>
@@ -199,5 +235,17 @@ const styles: Record<string, React.CSSProperties> = {
     position: 'relative',
     height: '100%',
     minWidth: 0,
+  },
+  errorBanner: {
+    position: 'absolute',
+    zIndex: 30,
+    top: 8,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    padding: '8px 14px',
+    borderRadius: 8,
+    background: '#FFF1F0',
+    color: '#A12622',
+    fontSize: 13,
   },
 };

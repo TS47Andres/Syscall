@@ -1,346 +1,249 @@
-import type { Email, HealthState, User } from './types';
+/**
+ * File: api.ts
+ * Role: Provides typed, authenticated HTTP access to the Syscall backend.
+ * Service: Frontend.
+ */
+import type { Draft, Email, HealthState, User } from './types';
 
-// Helper to generate the official welcome email for a user
-export const createWelcomeEmail = (phone: string, name?: string): Email => ({
-  publicId: `welcome-${phone}`,
-  senderAddress: 'welcome@syscall.in',
-  recipientAddress: `${phone}@niti`,
-  subject: 'Welcome to Syscall PhoneMail!',
-  textBody: `Hello${name ? ' ' + name.trim() : ''},
-
-Welcome to Syscall! Your Indian mobile number +91 ${phone} is your permanent PhoneMail address: ${phone}@niti.
-
-Here is what you can explore with Syscall:
-1. Pure Phone Addressing: Send and receive messages directly using 10-digit mobile numbers at @niti.
-2. Official Documentation: Read the developer setup guide at https://syscall.in/docs and inspect repository updates at https://github.com/syscall/phonemail-gateway.
-3. Telecom Regulatory Standards: Reviewed in accordance with national directives at www.trai.gov.in/telecom-standards.
-4. Real-time Ingestion Antivirus: Incoming MIME attachments and headers are stream-scanned before arrival. View real-time security bulletins at https://clamav.net/security-bulletins.
-
-Feel free to write to postmaster@niti or our support team if you have any questions!
-
-Enjoy your secure PhoneMail experience!
-— Syscall Postmaster Team`,
-  createdAt: new Date().toISOString(),
-  readAt: null,
-  isSpam: false,
-  attachments: [
-    {
-      filename: 'Syscall_Getting_Started.pdf',
-      contentType: 'application/pdf',
-      sizeBytes: 142300,
-      clamavStatus: 'clean',
-    },
-    {
-      filename: 'Project_Specification.docx',
-      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      sizeBytes: 85200,
-      clamavStatus: 'clean',
-    },
-    {
-      filename: 'telecom_security_handler.ts',
-      contentType: 'text/typescript',
-      sizeBytes: 12400,
-      clamavStatus: 'clean',
-    },
-    {
-      filename: 'architecture_diagram.png',
-      contentType: 'image/png',
-      sizeBytes: 320400,
-      clamavStatus: 'clean',
-    },
-    {
-      filename: 'demo_walkthrough.mp4',
-      contentType: 'video/mp4',
-      sizeBytes: 1845000,
-      clamavStatus: 'clean',
-    },
-    {
-      filename: 'Security_Certificate.pem',
-      contentType: 'application/x-pem-file',
-      sizeBytes: 4096,
-      clamavStatus: 'clean',
-    },
-    {
-      filename: 'quarantine_unverified_macro.docm',
-      contentType: 'application/vnd.ms-word.document.macroEnabled.12',
-      sizeBytes: 68400,
-      clamavStatus: 'infected',
-    },
-  ],
-});
-
-// Single initial email - nothing extra
-export const DEMO_EMAILS: Email[] = [
-  createWelcomeEmail('7682001264', 'User'),
-];
+interface AuthResult {
+  sessionToken: string;
+  user: User;
+  requiresPassword?: boolean;
+}
 
 class SyscallApi {
-  private sessionToken: string | null = localStorage.getItem('syscall_session_token');
+  private sessionToken: string | null = sessionStorage.getItem('syscall_session_token');
 
-  setSession(token: string | null) {
+  // Stores the short-lived browser session token without persisting credentials.
+  setSession(token: string | null): void {
     this.sessionToken = token;
-    if (token) localStorage.setItem('syscall_session_token', token);
-    else localStorage.removeItem('syscall_session_token');
+    if (token) sessionStorage.setItem('syscall_session_token', token);
+    else sessionStorage.removeItem('syscall_session_token');
   }
 
+  // Returns the current in-tab session token for session restoration.
   getSession(): string | null {
     return this.sessionToken;
   }
 
+  // Builds JSON headers and includes the backend session token when present.
   private headers(): Record<string, string> {
-    const h: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (this.sessionToken) {
-      h['X-Session-Token'] = this.sessionToken;
-    }
-    return h;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.sessionToken) headers['X-Session-Token'] = this.sessionToken;
+    return headers;
   }
 
-  // --- Auth / OTP ---
-  async requestOtp(phoneE164: string): Promise<{ status: string; cooldownSeconds?: number; code?: string }> {
-    try {
-      const res = await fetch('/api/auth/otp/request', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneE164 }),
-      });
-      if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        return data;
-      }
-    } catch (err) {
-      // Backend offline / network error
+  // Sends an API request and surfaces backend errors instead of substituting demo state.
+  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const response = await fetch(path, { ...init, headers: { ...this.headers(), ...init.headers } });
+    const data = await response.json().catch(() => ({})) as { error?: string };
+    if (response.status === 401 && this.sessionToken) {
+      this.setSession(null);
+      window.dispatchEvent(new Event('syscall:session-invalid'));
     }
-    // Generate and store random 6-digit code for verification (also allow 123456 as master test code)
-    const generated = Math.floor(100000 + Math.random() * 900000).toString();
-    sessionStorage.setItem(`syscall_otp_${phoneE164}`, generated);
-    console.info(`[Syscall Verification] One-Time Password for ${phoneE164} is: ${generated} (or 123456)`);
-    return { status: 'otp-sent', cooldownSeconds: 60, code: generated };
+    if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+    return data as T;
   }
 
-  async verifyOtp(phoneE164: string, otp: string): Promise<{ sessionToken: string; user: User }> {
-    let backendError: string | null = null;
-    try {
-      const res = await fetch('/api/auth/otp/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneE164, otp }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.sessionToken) {
-        this.setSession(data.sessionToken);
-        return data;
-      }
-      if (!res.ok) {
-        backendError = data.error || 'Invalid verification code';
-      }
-    } catch (networkErr) {
-      // Backend offline or unreachable
-    }
-
-    // If backend gave an explicit error (e.g. 400 wrong OTP), reject immediately!
-    if (backendError) {
-      throw new Error(backendError);
-    }
-
-    // In dev / standalone mode: check against generated OTP or test code 123456
-    const expected = sessionStorage.getItem(`syscall_otp_${phoneE164}`);
-    const matches = (expected && otp === expected) || otp === '123456';
-    if (!matches) {
-      throw new Error('Invalid verification code. Please check the 6 digits and try again.');
-    }
-
-    // Successful OTP verification
-    sessionStorage.removeItem(`syscall_otp_${phoneE164}`);
-    const raw10 = phoneE164.replace(/\D/g, '').slice(-10);
-    const savedName = localStorage.getItem(`syscall_name_${raw10}`);
-    const mockUser: User = {
-      id: `user-${raw10}`,
-      phone: raw10,
-      name: savedName || 'Akshat Joshi',
-      emailAddress: `${raw10}@niti`,
-      passwordConfigured: true,
-      accountStatus: 'active',
-    };
-    const mockToken = `mock-token-${Date.now()}`;
-    this.setSession(mockToken);
-    return { sessionToken: mockToken, user: mockUser };
+  // Requests a voice-led browser signup after collecting and validating the caller name.
+  async requestAccountCall(phone: string, name: string): Promise<{ status: string; callControlId: string }> {
+    return this.request('/api/onboarding/call-request', { method: 'POST', body: JSON.stringify({ phone, name }) });
   }
 
-  async loginWithPassword(phoneE164: string, password: string): Promise<{ sessionToken: string; user: User }> {
-    const raw10 = phoneE164.replace(/\D/g, '').slice(-10);
-
-    // Try backend authentication (/api/auth/password/login) with 2.5s timeout
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
-      const res = await fetch('/api/auth/password/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: phoneE164, password }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.sessionToken) {
-        this.setSession(data.sessionToken);
-        localStorage.setItem(`syscall_pwd_${raw10}`, password);
-        return data;
-      }
-      if (!res.ok && res.status === 401) {
-        throw new Error(data.error || 'Incorrect password. Please try again.');
-      }
-    } catch (netErr: any) {
-      if (netErr.message && netErr.message.includes('Incorrect password')) {
-        throw netErr;
-      }
-      // Live backend unreachable or timed out; proceed with local credentials check
-    }
-
-    // Local / Standalone authentication validation:
-    const savedPassword = localStorage.getItem(`syscall_pwd_${raw10}`);
-    const savedName = localStorage.getItem(`syscall_name_${raw10}`);
-
-    if (savedPassword) {
-      if (password !== savedPassword) {
-        throw new Error('Incorrect password. Please try again.');
-      }
-    } else {
-      // If no password configured yet, save this password for the user if valid (>=6 chars)
-      if (password.length < 6) {
-        throw new Error('Password must be at least 6 characters.');
-      }
-      localStorage.setItem(`syscall_pwd_${raw10}`, password);
-      localStorage.setItem(`syscall_active_${raw10}`, 'true');
-    }
-
-    const mockUser: User = {
-      id: `user-${raw10}`,
-      phone: raw10,
-      name: savedName || 'Akshat Joshi',
-      emailAddress: `${raw10}@niti`,
-      passwordConfigured: true,
-      accountStatus: 'active',
-    };
-    const mockToken = `mock-token-${Date.now()}`;
-    this.setSession(mockToken);
-    return { sessionToken: mockToken, user: mockUser };
+  // Starts an outbound test call to the IVR gateway.
+  async startOutboundCall(phoneE164: string): Promise<{ status: string; callControlId?: string }> {
+    return this.request('/calls/start', { method: 'POST', body: JSON.stringify({ phone: phoneE164 }) });
   }
 
-  async register(phoneE164: string, password: string, name?: string): Promise<{ sessionToken: string; user: User }> {
-    const raw10 = phoneE164.replace(/\D/g, '').slice(-10);
-
-    // Save user credentials locally so password login works seamlessly offline or online
-    localStorage.setItem(`syscall_pwd_${raw10}`, password);
-    localStorage.setItem(`syscall_name_${raw10}`, name || 'Akshat Joshi');
-    localStorage.setItem(`syscall_active_${raw10}`, 'true');
-
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
-      const res = await fetch('/api/auth/password/set', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this.headers() },
-        body: JSON.stringify({ phone: phoneE164, password, name }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.sessionToken) {
-        this.setSession(data.sessionToken);
-        return data;
-      }
-    } catch (e: any) {
-      // In dev fallback or if endpoint not yet mounted
-    }
-
-    const mockUser: User = {
-      id: `user-${raw10}`,
-      phone: raw10,
-      name: name || undefined,
-      emailAddress: `${raw10}@niti`,
-      passwordConfigured: true,
-      accountStatus: 'active',
-    };
-    const mockToken = `mock-token-${Date.now()}`;
-    this.setSession(mockToken);
-    return { sessionToken: mockToken, user: mockUser };
+  // Verifies an existing account's password and creates a real backend session.
+  async loginWithPassword(phone: string, password: string): Promise<AuthResult> {
+    const result = await this.request<AuthResult>('/api/auth/password/login', { method: 'POST', body: JSON.stringify({ phone, password }) });
+    this.setSession(result.sessionToken);
+    return result;
   }
 
-  // --- Outbound Telnyx Call ---
-  async startOutboundCall(phoneE164: string): Promise<{ status: string; callControlId?: string; error?: string }> {
-    const res = await fetch('/calls/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: phoneE164 }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `Call dispatch failed (${res.status})`);
-    return data;
+  // Requests a backend OTP for an existing account.
+  async requestOtp(phone: string): Promise<{ status: string; cooldownSeconds?: number }> {
+    return this.request('/api/auth/otp/request', { method: 'POST', body: JSON.stringify({ phone }) });
   }
 
-  // --- Mailbox ---
-  async getMail(phone?: string): Promise<Email[]> {
-    try {
-      const res = await fetch('/api/mail', { headers: this.headers() });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) return data;
-      }
-    } catch (e) {
-      // offline or unauthenticated
-    }
-    if (phone) {
-      const stored = localStorage.getItem(`syscall_emails_${phone}`);
-      if (stored) {
-        try {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        } catch {}
-      }
-      const single = createWelcomeEmail(phone);
-      localStorage.setItem(`syscall_emails_${phone}`, JSON.stringify([single]));
-      return [single];
-    }
-    return DEMO_EMAILS;
+  // Verifies an existing-account OTP and stores the returned session token.
+  async verifyOtp(phone: string, otp: string): Promise<AuthResult> {
+    const result = await this.request<AuthResult>('/api/auth/otp/verify', { method: 'POST', body: JSON.stringify({ phone, otp }) });
+    this.setSession(result.sessionToken);
+    return result;
   }
 
-  async sendMail(to: string, subject: string, textBody: string): Promise<{ publicId: string }> {
-    const res = await fetch('/api/mail/send', {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify({ to, subject, textBody }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Failed to dispatch email');
-    return data;
+  // Persists a password for a signed-in account that has not set one yet.
+  async setPassword(password: string): Promise<{ user: User }> {
+    return this.request('/api/auth/password/set', { method: 'POST', body: JSON.stringify({ password }) });
   }
 
-  // --- Health Telemetry ---
+  // Requests a password reset without exposing account existence to the browser.
+  async requestPasswordReset(phone: string): Promise<{ status: string }> {
+    return this.request('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ phone }) });
+  }
+
+  // Replaces a password with a one-time, backend-issued reset token.
+  async resetPassword(token: string, password: string): Promise<void> {
+    await this.request('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, password }) });
+  }
+
+  // Revokes the current backend session and clears its browser token.
+  async logout(): Promise<void> {
+    try { await this.request('/api/auth/logout', { method: 'POST' }); }
+    finally { this.setSession(null); }
+  }
+
+  // Restores the account bound to the current session from the backend.
+  async getMe(): Promise<User> {
+    const result = await this.request<{ user: User }>('/api/auth/me');
+    return result.user;
+  }
+
+  // Fetches current mailbox messages from the backend.
+  async getMail(): Promise<Email[]> {
+    return this.request('/api/mail');
+  }
+
+  // Fetches the authenticated participant's recoverable trash.
+  async getTrash(): Promise<Email[]> {
+    return this.request('/api/mail/trash');
+  }
+
+  // Fetches one message and marks it read when the account is its recipient.
+  async getEmail(publicId: string): Promise<Email> {
+    return this.request(`/api/mail/${encodeURIComponent(publicId)}`);
+  }
+
+  // Converts browser files to validated JSON attachment payloads for the API.
+  private async encodeAttachments(files: File[] = []): Promise<Array<{ filename: string; contentType: string; contentBase64: string }>> {
+    return Promise.all(files.map(async (file) => ({
+      filename: file.name,
+      contentType: file.type || 'application/octet-stream',
+      contentBase64: await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '');
+        reader.onerror = () => reject(new Error(`Could not read attachment ${file.name}.`));
+        reader.readAsDataURL(file);
+      }),
+    })));
+  }
+
+  // Queues a new email and its optional uploaded attachments.
+  async sendMail(to: string, subject: string, textBody: string, attachments: File[] = []): Promise<{ publicId: string }> {
+    return this.request('/api/mail/send', { method: 'POST', body: JSON.stringify({ to, subject, textBody, attachments: await this.encodeAttachments(attachments) }) });
+  }
+
+  // Queues a server-threaded reply to a message.
+  async replyToEmail(publicId: string, textBody: string, attachments: File[] = []): Promise<{ publicId: string }> {
+    return this.request(`/api/mail/${encodeURIComponent(publicId)}/reply`, { method: 'POST', body: JSON.stringify({ textBody, attachments: await this.encodeAttachments(attachments) }) });
+  }
+
+  // Moves the current participant's message copy to recoverable trash.
+  async trashEmail(publicId: string): Promise<void> {
+    await this.request(`/api/mail/${encodeURIComponent(publicId)}`, { method: 'DELETE' });
+  }
+
+  // Restores a trashed message for this participant.
+  async restoreEmail(publicId: string): Promise<void> {
+    await this.request(`/api/mail/${encodeURIComponent(publicId)}/restore`, { method: 'POST' });
+  }
+
+  // Permanently deletes a trashed message for this participant.
+  async permanentlyDeleteEmail(publicId: string): Promise<void> {
+    await this.request(`/api/mail/${encodeURIComponent(publicId)}/permanent`, { method: 'DELETE' });
+  }
+
+  // Permanently deletes all messages currently in this participant's trash.
+  async emptyTrash(): Promise<void> {
+    await this.request('/api/mail/trash', { method: 'DELETE' });
+  }
+
+  // Stores or clears the authenticated participant's star on a message.
+  async setStar(publicId: string, starred: boolean): Promise<void> {
+    await this.request(`/api/mail/${encodeURIComponent(publicId)}/star`, { method: starred ? 'PUT' : 'DELETE' });
+  }
+
+  // Marks or clears the recipient's spam classification for one message.
+  async setSpam(publicId: string, spam: boolean): Promise<void> {
+    await this.request(`/api/mail/${encodeURIComponent(publicId)}/spam`, { method: spam ? 'POST' : 'DELETE' });
+  }
+
+  // Fetches the user's server-owned draft list.
+  async getDrafts(): Promise<Draft[]> {
+    return this.request('/api/drafts');
+  }
+
+  // Creates a draft including any uploaded attachments.
+  async createDraft(draft: Partial<Draft>, attachments: File[] = []): Promise<{ publicId: string }> {
+    return this.request('/api/drafts', { method: 'POST', body: JSON.stringify({ to: draft.recipientAddress, subject: draft.subject ?? '', textBody: draft.textBody ?? '', attachments: await this.encodeAttachments(attachments) }) });
+  }
+
+  // Updates a server-owned draft's editable fields.
+  async getDraft(publicId: string): Promise<Draft> {
+    return this.request(`/api/drafts/${encodeURIComponent(publicId)}`);
+  }
+
+  // Updates a server-owned draft and optionally replaces its uploaded files.
+  async updateDraft(publicId: string, draft: Partial<Draft>, attachments?: File[]): Promise<Draft> {
+    const files = attachments === undefined ? undefined : await this.encodeAttachments(attachments);
+    return this.request(`/api/drafts/${encodeURIComponent(publicId)}`, { method: 'PATCH', body: JSON.stringify({ to: draft.recipientAddress, subject: draft.subject, textBody: draft.textBody, ...(files === undefined ? {} : { attachments: files }) }) });
+  }
+
+  // Deletes a server-owned draft.
+  async deleteDraft(publicId: string): Promise<void> {
+    await this.request(`/api/drafts/${encodeURIComponent(publicId)}`, { method: 'DELETE' });
+  }
+
+  // Queues delivery of a complete server-owned draft.
+  async sendDraft(publicId: string): Promise<void> {
+    await this.request(`/api/drafts/${encodeURIComponent(publicId)}/send`, { method: 'POST' });
+  }
+
+  // Fetches pending scheduled messages belonging to the current sender.
+  async getScheduled(): Promise<Email[]> {
+    return this.request('/api/mail/scheduled');
+  }
+
+  // Creates a scheduled message with server-calculated delivery time.
+  async scheduleMail(input: { to: string; subject: string; textBody: string; scheduledAt: string; attachments?: File[] }): Promise<{ publicId: string }> {
+    return this.request('/api/mail/scheduled', { method: 'POST', body: JSON.stringify({ ...input, attachments: await this.encodeAttachments(input.attachments) }) });
+  }
+
+  // Changes the time for an existing pending scheduled message.
+  async rescheduleMail(publicId: string, scheduledAt: string): Promise<void> {
+    await this.request(`/api/mail/scheduled/${encodeURIComponent(publicId)}`, { method: 'PATCH', body: JSON.stringify({ scheduledAt }) });
+  }
+
+  // Cancels delivery of a pending scheduled message.
+  async cancelScheduledMail(publicId: string): Promise<void> {
+    await this.request(`/api/mail/scheduled/${encodeURIComponent(publicId)}`, { method: 'DELETE' });
+  }
+
+  // Loads profile data from server-side persistence.
+  async getProfile(): Promise<{ name: string; avatarUrl: string | null }> {
+    return this.request('/api/profile');
+  }
+
+  // Saves a name and optional JPEG data to the authenticated profile.
+  async updateProfile(input: { name?: string; avatarBase64?: string }): Promise<{ name: string; avatarAvailable: boolean }> {
+    return this.request('/api/profile', { method: 'PATCH', body: JSON.stringify(input) });
+  }
+
+  // Downloads an authenticated email or draft attachment as a browser Blob.
+  async downloadAttachment(kind: 'mail' | 'draft', publicId: string, index: number): Promise<{ blob: Blob; filename: string }> {
+    const path = kind === 'mail' ? `/api/mail/${encodeURIComponent(publicId)}/attachments/${index}` : `/api/drafts/${encodeURIComponent(publicId)}/attachments/${index}`;
+    const result = await this.request<{ filename: string; contentType: string; contentBase64: string }>(path);
+    const bytes = Uint8Array.from(atob(result.contentBase64), (character) => character.charCodeAt(0));
+    return { blob: new Blob([bytes], { type: result.contentType }), filename: result.filename };
+  }
+
+  // Reads backend health without inventing an offline success state.
   async checkHealth(): Promise<HealthState> {
-    try {
-      const res = await fetch('/ready');
-      if (res.ok) {
-        const data = await res.json();
-        return {
-          ready: data.status === 'ready',
-          mongodb: data.dependencies?.mongodb ?? false,
-          redis: data.dependencies?.redis ?? false,
-          clamav: data.dependencies?.clamav ?? false,
-          telnyxConfigured: data.dependencies?.telnyxConfigured ?? false,
-          apiPort: 3000,
-        };
-      }
-    } catch {
-      // offline
-    }
-    return {
-      ready: false,
-      mongodb: false,
-      redis: false,
-      clamav: false,
-      telnyxConfigured: false,
-      apiPort: 3000,
-    };
+    const response = await fetch('/ready');
+    const data = await response.json() as { status: string; dependencies?: Record<string, boolean> };
+    return { ready: data.status === 'ready', mongodb: data.dependencies?.mongodb ?? false, redis: data.dependencies?.redis ?? false, clamav: data.dependencies?.clamav ?? false, telnyxConfigured: data.dependencies?.telnyxConfigured ?? false, apiPort: 3000 };
   }
 }
 

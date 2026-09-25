@@ -11,6 +11,8 @@ export interface UserDocument extends Document {
   phoneE164: string;
   phone10Digit: string;
   emailAddress: string;
+  displayName: string;
+  avatarStorageKey: string | null;
   passwordHash: string | null;
   passwordConfigured: boolean;
   accountStatus: 'active' | 'disabled';
@@ -40,9 +42,13 @@ export interface EmailDocument extends Document {
   scheduledByVoice: boolean;
   scheduleActionId?: string;
   isSpam: boolean;
+  senderStarredAt: Date | null;
+  recipientStarredAt: Date | null;
   readAt: Date | null;
   senderDeletedAt: Date | null;
   recipientDeletedAt: Date | null;
+  senderPermanentlyDeletedAt: Date | null;
+  recipientPermanentlyDeletedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   deliveredAt: Date | null;
@@ -105,6 +111,8 @@ const userSchema = new Schema<UserDocument>({
   phoneE164: { type: String, required: true, unique: true, index: true },
   phone10Digit: { type: String, required: true, unique: true, index: true },
   emailAddress: { type: String, required: true, unique: true, index: true },
+  displayName: { type: String, default: '' },
+  avatarStorageKey: { type: String, default: null },
   passwordHash: { type: String, default: null },
   passwordConfigured: { type: Boolean, required: true, default: false },
   accountStatus: { type: String, enum: ['active', 'disabled'], default: 'active', index: true },
@@ -133,9 +141,13 @@ const emailSchema = new Schema<EmailDocument>({
   scheduledByVoice: { type: Boolean, default: false },
   scheduleActionId: { type: String },
   isSpam: { type: Boolean, default: false, index: true },
+  senderStarredAt: { type: Date, default: null },
+  recipientStarredAt: { type: Date, default: null },
   readAt: { type: Date, default: null, index: true },
   senderDeletedAt: { type: Date, default: null },
   recipientDeletedAt: { type: Date, default: null },
+  senderPermanentlyDeletedAt: { type: Date, default: null },
+  recipientPermanentlyDeletedAt: { type: Date, default: null },
   deliveredAt: { type: Date, default: null },
   failedAt: { type: Date, default: null },
   lastDeliveryError: { type: String, default: null },

@@ -1,3 +1,8 @@
+/**
+ * File: DedicatedProfilePage.tsx
+ * Role: Edits persisted profile fields and displays backend account state.
+ * Service: Frontend.
+ */
 import React, { useRef, useState } from 'react';
 import type { User } from '../../types';
 import { getInitials } from '../../types';
@@ -10,8 +15,8 @@ import {
 
 interface DedicatedProfilePageProps {
   currentUser: User;
-  onUpdateName: (newName: string) => void;
-  onUpdatePhoto: (photoUrl: string) => void;
+  onUpdateName: (newName: string) => Promise<void>;
+  onUpdatePhoto: (photoUrl: string) => Promise<void>;
   onSignOut: () => void;
   onBackToMail: () => void;
 }
@@ -24,9 +29,10 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
   onBackToMail,
 }) => {
   const profileFileInputRef = useRef<HTMLInputElement | null>(null);
-  const [editingName, setEditingName] = useState<string>(currentUser.name || 'Akshat Joshi');
+  const [editingName, setEditingName] = useState<string>(currentUser.name || '');
   const [nameSavedSuccess, setNameSavedSuccess] = useState<boolean>(false);
   const [isCopiedAddress, setIsCopiedAddress] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const handleProfilePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -58,9 +64,9 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
           if (ctx) {
             ctx.drawImage(img, 0, 0, width, height);
             const compressed = canvas.toDataURL('image/jpeg', 0.85);
-            onUpdatePhoto(compressed);
+            void onUpdatePhoto(compressed).catch((error: unknown) => setErrorMessage(error instanceof Error ? error.message : 'Could not update profile photo.'));
           } else {
-            onUpdatePhoto(rawResult);
+            void onUpdatePhoto(rawResult).catch((error: unknown) => setErrorMessage(error instanceof Error ? error.message : 'Could not update profile photo.'));
           }
         };
         img.src = rawResult;
@@ -69,12 +75,17 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const handleSaveName = () => {
+  const handleSaveName = async () => {
     const trimmed = editingName.trim();
     if (!trimmed) return;
-    onUpdateName(trimmed);
-    setNameSavedSuccess(true);
-    setTimeout(() => setNameSavedSuccess(false), 2500);
+    setErrorMessage(null);
+    try {
+      await onUpdateName(trimmed);
+      setNameSavedSuccess(true);
+      setTimeout(() => setNameSavedSuccess(false), 2500);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not update display name.');
+    }
   };
 
   const handleCopyAddress = () => {
@@ -143,10 +154,11 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
           </div>
 
           <div style={{ textAlign: 'center', marginTop: '12px' }}>
-            <h1 style={styles.profileMainTitle}>{currentUser.name || 'Akshat Joshi'}</h1>
+            <h1 style={styles.profileMainTitle}>{currentUser.name || 'Syscall account'}</h1>
             <p style={styles.profileSubtitle}>Manage your Indian PhoneMail identity, credentials, and security</p>
           </div>
         </div>
+        {errorMessage && <div role="alert" style={styles.profileError}>{errorMessage}</div>}
 
         {/* Editable Name Card */}
         <div style={styles.profileInfoSection}>
@@ -175,7 +187,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
             )}
           </div>
 
-          {/* PhoneMail Address Card */}
+          {/* Syscall address card */}
           <div style={styles.profileFieldGroup}>
             <label style={styles.profileFieldLabel}>Your PhoneMail Address</label>
             <div style={styles.addressDisplayBox}>
@@ -410,6 +422,13 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#146C2E',
     fontWeight: 600,
     marginTop: '4px',
+  },
+  profileError: {
+    margin: '12px 24px',
+    padding: '10px 14px',
+    color: '#A12622',
+    background: '#FFF1F0',
+    borderRadius: 8,
   },
   addressDisplayBox: {
     display: 'flex',

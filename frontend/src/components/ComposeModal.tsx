@@ -1,17 +1,34 @@
+/**
+ * File: ComposeModal.tsx
+ * Role: Composes, schedules, and saves messages using backend callbacks.
+ * Service: Frontend.
+ */
 import React, { useState, useRef } from 'react';
-import { api } from '../api';
 import { IconCompose, IconClose, IconShieldCheck, IconSent } from './Icons';
+import { api } from '../api';
+import type { Attachment } from '../types';
 
 interface ComposeModalProps {
   initialTo?: string;
   onClose: () => void;
-  onSent: (newMail: { to: string; subject: string; textBody: string }) => void;
+  onSent: (newMail: { to: string; subject: string; textBody: string; attachments?: File[]; replyToId?: string; draftId?: string }) => Promise<void> | void;
+  onSaveDraft: (draft: { to: string; subject: string; textBody: string; attachments?: File[]; draftId?: string }) => Promise<void>;
+  onSchedule: (message: { to: string; subject: string; textBody: string; scheduledAt: string; attachments?: File[] }) => Promise<void>;
+  initialSubject?: string;
+  initialBody?: string;
+  replyToId?: string;
+  draftId?: string;
+  initialAttachments?: Attachment[];
+  mailDomain?: string;
 }
 
-export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', onClose, onSent }) => {
+export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', initialSubject = '', initialBody = '', replyToId, draftId, initialAttachments = [], mailDomain = 'niti', onClose, onSent, onSaveDraft, onSchedule }) => {
   const [toInput, setToInput] = useState<string>(initialTo);
-  const [subject, setSubject] = useState<string>('');
-  const [body, setBody] = useState<string>('');
+  const [subject, setSubject] = useState<string>(initialSubject);
+  const [body, setBody] = useState<string>(initialBody);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [attachmentsChanged, setAttachmentsChanged] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState('');
   const [sending, setSending] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
@@ -64,17 +81,17 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', onCl
     if (clean.includes('@')) {
       const parts = clean.split('@');
       const phoneDigits = parts[0].replace(/\D/g, '').slice(-10);
-      return `${phoneDigits}@${parts[1] || 'niti'}`;
+      return `${phoneDigits}@${parts[1] || mailDomain}`;
     }
     const raw10 = clean.replace(/\D/g, '').slice(-10);
-    return raw10 ? `${raw10}@niti` : clean;
+    return raw10 ? `${raw10}@${mailDomain}` : clean;
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const finalTo = normalizeToAddress(toInput);
-    if (!finalTo.endsWith('@niti')) {
-      setErrorMsg('Recipient must be a valid Indian PhoneMail address (e.g. 9876543210@niti)');
+    if (!finalTo.endsWith(`@${mailDomain}`)) {
+      setErrorMsg(`Recipient must be an existing Syscall address, such as 9876543210@${mailDomain}.`);
       return;
     }
     if (!subject.trim()) {
@@ -85,13 +102,49 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', onCl
     setSending(true);
     setErrorMsg(null);
     try {
-      await api.sendMail(finalTo, subject, body);
-      onSent({ to: finalTo, subject, textBody: body });
+      if (scheduledAt) {
+        if (replyToId || draftId) throw new Error('Save or send this reply/draft before scheduling it.');
+        const scheduleDate = new Date(scheduledAt);
+        if (!Number.isFinite(scheduleDate.getTime()) || scheduleDate.getTime() <= Date.now()) throw new Error('Choose a future delivery time.');
+        await onSchedule({ to: finalTo, subject, textBody: body, scheduledAt: scheduleDate.toISOString(), attachments: attachmentsChanged ? attachments : undefined });
+      } else {
+        await onSent({ to: finalTo, subject, textBody: body, attachments: attachmentsChanged ? attachments : undefined, replyToId, draftId });
+      }
       onClose();
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to dispatch email.');
     } finally {
       setSending(false);
+    }
+  };
+
+  // Saves current compose content and attachments as a durable backend draft.
+  const handleSaveDraft = async () => {
+    setSending(true);
+    setErrorMsg(null);
+    try {
+      await onSaveDraft({ to: toInput.trim(), subject, textBody: body, attachments: attachmentsChanged ? attachments : undefined, draftId });
+      onClose();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Could not save draft.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Downloads an existing saved-draft attachment without exposing its storage key.
+  const handleDownloadDraftAttachment = async (index: number): Promise<void> => {
+    if (!draftId) return;
+    try {
+      const downloaded = await api.downloadAttachment('draft', draftId, index);
+      const url = URL.createObjectURL(downloaded.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloaded.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (reason) {
+      setErrorMsg(reason instanceof Error ? reason.message : 'Could not download draft attachment.');
     }
   };
 
@@ -170,7 +223,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', onCl
                   autoFocus
                   required
                 />
-                <span style={styles.domainTag}>@niti</span>
+                  <span style={styles.domainTag}>@{mailDomain}</span>
               </div>
             </div>
 
@@ -199,12 +252,18 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', onCl
               />
             </div>
 
+            <label style={styles.attachmentLabel}>Attach files<input type="file" multiple onChange={(event) => { setAttachments(Array.from(event.target.files ?? [])); setAttachmentsChanged(true); }} /></label>
+            {!attachmentsChanged && initialAttachments.map((file, index) => <button key={`${file.filename}-${index}`} type="button" onClick={() => void handleDownloadDraftAttachment(index)} style={styles.attachmentDownload}>{file.filename} · {(file.sizeBytes / 1024).toFixed(1)} KB</button>)}
+            {(attachmentsChanged ? attachments.length : initialAttachments.length) > 0 && <span style={{ fontSize: 12, color: '#5E6674' }}>{attachmentsChanged ? attachments.length : initialAttachments.length} attachment(s){attachmentsChanged && initialAttachments.length ? ' (replaces saved files)' : ''}</span>}
+            {!replyToId && !draftId && <label style={styles.attachmentLabel}>Schedule delivery<input type="datetime-local" value={scheduledAt} min={new Date(Date.now() + 60000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)} onChange={(event) => setScheduledAt(event.target.value)} /></label>}
+
             {/* Actions: Discard with Shield Tooltip next to it, and Send Syscall button */}
             <div style={styles.actionRow}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button" onClick={onClose} style={styles.cancelBtn}>
                   Discard
                 </button>
+                <button type="button" onClick={() => void handleSaveDraft()} style={styles.cancelBtn} disabled={sending}>Save draft</button>
                 <span
                   title="Protected by ClamAV real-time antivirus scan"
                   data-tooltip="Protected by ClamAV real-time antivirus scan"
@@ -216,7 +275,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', onCl
 
               <button type="submit" disabled={sending} style={styles.sendBtn}>
                 <IconSent size={15} color="#FFFFFF" />
-                <span>{sending ? 'Queueing...' : 'Send Syscall'}</span>
+                <span>{sending ? 'Queueing...' : scheduledAt ? 'Schedule Syscall' : 'Send Syscall'}</span>
               </button>
             </div>
           </form>
@@ -399,5 +458,21 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '6px',
+  },
+  attachmentLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    fontSize: 12,
+    color: '#444746',
+  },
+  attachmentDownload: {
+    padding: '4px 0',
+    border: 0,
+    background: 'transparent',
+    color: '#0B57D0',
+    fontSize: 12,
+    textAlign: 'left',
+    cursor: 'pointer',
   },
 };

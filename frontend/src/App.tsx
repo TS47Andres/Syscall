@@ -1,3 +1,8 @@
+/**
+ * File: App.tsx
+ * Role: Restores authenticated sessions and mounts browser routes.
+ * Service: Frontend.
+ */
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import type { User } from './types';
@@ -13,29 +18,26 @@ export function App() {
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Check if session token and user data exist
-    const token = api.getSession();
-    const savedUserJson = localStorage.getItem('syscall_user_data');
-    if (token && savedUserJson) {
-      try {
-        const parsed = JSON.parse(savedUserJson);
-        setUser(parsed);
-      } catch {
-        // invalid JSON
-      }
-    }
-    setLoading(false);
+    let cancelled = false;
+    // Returns to sign-in when an API request proves the stored token is no longer valid.
+    const handleInvalidSession = () => setUser(null);
+    window.addEventListener('syscall:session-invalid', handleInvalidSession);
+    // Validates the browser token with the API instead of trusting cached identity data.
+    void (async () => {
+      if (!api.getSession()) { setLoading(false); return; }
+      try { const authenticatedUser = await api.getMe(); if (!cancelled) setUser(authenticatedUser); }
+      catch { api.setSession(null); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; window.removeEventListener('syscall:session-invalid', handleInvalidSession); };
   }, []);
 
   const handleAuthSuccess = (authenticatedUser: User) => {
     setUser(authenticatedUser);
-    localStorage.setItem('syscall_user_data', JSON.stringify(authenticatedUser));
   };
 
   const handleSignOut = () => {
-    api.setSession(null);
-    localStorage.removeItem('syscall_user_data');
-    setUser(null);
+    void api.logout().finally(() => setUser(null));
   };
 
   if (loading) {
@@ -43,7 +45,7 @@ export function App() {
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--gmail-bg)' }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
           <div style={{ width: 36, height: 36, borderRadius: '50%', border: '3px solid #E0E2EC', borderTopColor: '#0B57D0', animation: 'spin 1s infinite linear' }}></div>
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#5E5E5E' }}>Loading Syscall PhoneMail...</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#5E5E5E' }}>Loading Syscall...</span>
         </div>
       </div>
     );
@@ -72,6 +74,10 @@ export function App() {
               <AuthPage onAuthSuccess={handleAuthSuccess} />
             )
           }
+        />
+        <Route
+          path="/reset-password"
+          element={user ? <Navigate to="/mail/inbox" replace /> : <AuthPage onAuthSuccess={handleAuthSuccess} />}
         />
 
         {/* Protected mailbox & app layout routes */}

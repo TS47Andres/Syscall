@@ -1,5 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { api, createWelcomeEmail } from '../../api';
+/**
+ * File: AuthScreen.tsx
+ * Role: Preserves Syscall's branded sign-in and account creation experience and handles backend authentication.
+ * Service: Frontend.
+ */
+import React, { useEffect, useState } from 'react';
+import { api } from '../../api';
 import type { User } from '../../types';
 import { getInitials } from '../../types';
 import { SyscallLogo } from '../Logo';
@@ -8,6 +13,7 @@ import {
   IconEye,
   IconEyeOff,
   IconAlert,
+  IconPhone,
 } from '../Icons';
 import { PasswordStrengthMeter, getPasswordStrength } from './PasswordStrengthMeter';
 import { OtpInputGroup } from './OtpInputGroup';
@@ -24,15 +30,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   initialMode = 'signin',
   onNavigateMode,
 }) => {
-  // Mode: 'signin' or 'create'
+  const resetToken = new URLSearchParams(window.location.search).get('token');
   const [mode, setMode] = useState<'signin' | 'create'>(initialMode);
-  // Sub-step: 'form' or 'otp'
-  const [subStep, setSubStep] = useState<'form' | 'otp'>('form');
+  const [subStep, setSubStep] = useState<'form' | 'otp' | 'call-requested' | 'password' | 'reset'>(
+    resetToken ? 'reset' : 'form'
+  );
 
   useEffect(() => {
     setMode(initialMode);
-    setSubStep('form');
-  }, [initialMode]);
+    setSubStep(resetToken ? 'reset' : 'form');
+  }, [initialMode, resetToken]);
 
   // Form State
   const [fullName, setFullName] = useState<string>('');
@@ -40,10 +47,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
   const [signInWithOtp, setSignInWithOtp] = useState<boolean>(false);
 
   // OTP State (compact 6 boxes)
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
+  const [resetAfterOtp, setResetAfterOtp] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState<number>(0);
@@ -56,8 +65,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
-  const raw10 = phoneInput.replace(/\D/g, '').slice(0, 10);
-  const pwdStrength = useMemo(() => getPasswordStrength(password), [password]);
+  const raw10 = phoneInput.replace(/\D/g, '').slice(-10);
 
   // Switch modes
   const handleSwitchToCreate = () => {
@@ -109,6 +117,52 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
   };
 
+  // Optional voice-assisted onboarding request
+  const handleRequestVoiceSetup = async () => {
+    setErrorMessage(null);
+    if (fullName.trim().length < 2) {
+      setErrorMessage('Please enter your full name before requesting a call');
+      return;
+    }
+    if (raw10.length !== 10) {
+      setErrorMessage('Please enter a valid 10-digit mobile number');
+      return;
+    }
+    setLoading(true);
+    try {
+      await api.requestAccountCall(raw10, fullName.trim());
+      setSubStep('call-requested');
+    } catch (reason: any) {
+      setErrorMessage(reason.message || 'Could not request the setup call');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Sends an OTP to an existing account for sign-in or password reset
+  const requestOtp = async (isPasswordReset = false): Promise<void> => {
+    setErrorMessage(null);
+    if (raw10.length !== 10) {
+      setErrorMessage('Please enter a valid 10-digit Indian mobile number');
+      return;
+    }
+    setLoading(true);
+    try {
+      const result = await api.requestOtp(`+91${raw10}`);
+      setResendCooldown(result.cooldownSeconds ?? 60);
+      setOtpDigits(['', '', '', '', '', '']);
+      setResetAfterOtp(isPasswordReset);
+      setSubStep('otp');
+      if (isPasswordReset) {
+        setErrorMessage('If an account exists, a verification code has been sent by SMS.');
+      }
+    } catch (reason: any) {
+      setErrorMessage(reason.message || 'Could not request a verification code');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Submit Sign In Form (Password or OTP)
   const handleSignInNext = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -120,17 +174,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     }
 
     if (signInWithOtp) {
-      setLoading(true);
-      try {
-        const res = await api.requestOtp(`+91${raw10}`);
-        setResendCooldown(res.cooldownSeconds || 60);
-        setOtpDigits(['', '', '', '', '', '']);
-        setSubStep('otp');
-      } catch (err: any) {
-        setErrorMessage(err.message || 'Failed to send OTP to your number');
-      } finally {
-        setLoading(false);
-      }
+      await requestOtp(false);
     } else {
       if (!password) {
         setErrorMessage('Please enter your password');
@@ -143,31 +187,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           id: `user-${raw10}`,
           phone: raw10,
           emailAddress: `${raw10}@niti`,
-          name: localStorage.getItem(`syscall_name_${raw10}`) || fullName.trim() || 'Akshat Joshi',
+          name: fullName.trim() || 'Akshat Joshi',
           passwordConfigured: true,
           accountStatus: 'active',
         };
-        api.setSession(authRes.sessionToken || 'demo-session-token');
-        if (user.name) {
-          localStorage.setItem(`syscall_name_${raw10}`, user.name);
-        }
-
-        const existingEmails = localStorage.getItem(`syscall_emails_${raw10}`);
-        if (!existingEmails) {
-          const welcome = createWelcomeEmail(raw10);
-          localStorage.setItem(`syscall_emails_${raw10}`, JSON.stringify([welcome]));
-        }
-
         onSuccess(user);
       } catch (err: any) {
-        setErrorMessage(err.message || 'Incorrect password or account not found');
+        setErrorMessage(err.message || 'Invalid mobile number or password');
       } finally {
         setLoading(false);
       }
     }
   };
 
-  // Verify OTP
+  // Verify OTP for Signup or Sign-in
   const handleVerifyOtp = async (codeToVerify?: string) => {
     const code = codeToVerify || otpDigits.join('');
     if (code.length !== 6) {
@@ -182,47 +215,80 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       const fullPhone = `+91${raw10}`;
       const res = await api.verifyOtp(fullPhone, code);
 
+      if (resetAfterOtp) {
+        setResetAfterOtp(false);
+        setSubStep('password');
+        return;
+      }
+
+      // If user came from Create Account and specified a password, set it
+      if (mode === 'create' && password) {
+        try {
+          await api.setPassword(password);
+        } catch {
+          // Password set best-effort
+        }
+      }
+
+      // If user provided a name during create, update it
+      if (mode === 'create' && fullName.trim()) {
+        try {
+          await api.updateProfile({ name: fullName.trim() });
+        } catch {
+          // Name update best-effort
+        }
+      }
+
       if (res.user) {
         const user: User = {
           ...res.user,
-          name: fullName.trim() || res.user.name || localStorage.getItem(`syscall_name_${raw10}`) || 'Akshat Joshi',
+          name: fullName.trim() || res.user.name || 'Akshat Joshi',
         };
-        api.setSession(res.sessionToken || 'demo-session-token');
-        if (user.name) {
-          localStorage.setItem(`syscall_name_${raw10}`, user.name);
-        }
-
-        const existingEmails = localStorage.getItem(`syscall_emails_${raw10}`);
-        if (!existingEmails) {
-          const welcome = createWelcomeEmail(raw10);
-          localStorage.setItem(`syscall_emails_${raw10}`, JSON.stringify([welcome]));
-        }
-
         onSuccess(user);
       } else {
-        const user: User = {
+        const fallbackUser: User = {
           id: `user-${raw10}`,
           phone: raw10,
           emailAddress: `${raw10}@niti`,
-          name: fullName.trim() || localStorage.getItem(`syscall_name_${raw10}`) || 'Akshat Joshi',
+          name: fullName.trim() || 'Akshat Joshi',
           passwordConfigured: true,
           accountStatus: 'active',
         };
-        api.setSession('demo-session-token');
-        if (user.name) {
-          localStorage.setItem(`syscall_name_${raw10}`, user.name);
-        }
-
-        const existingEmails = localStorage.getItem(`syscall_emails_${raw10}`);
-        if (!existingEmails) {
-          const welcome = createWelcomeEmail(raw10);
-          localStorage.setItem(`syscall_emails_${raw10}`, JSON.stringify([welcome]));
-        }
-
-        onSuccess(user);
+        onSuccess(fallbackUser);
       }
     } catch (err: any) {
       setErrorMessage(err.message || 'Invalid or expired verification code');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetPassword = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      const result = await api.setPassword(password);
+      onSuccess(result.user);
+    } catch (reason: any) {
+      setErrorMessage(reason.message || 'Could not save the password');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCompleteReset = async (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    if (!resetToken) return;
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      await api.resetPassword(resetToken, password);
+      setSubStep('form');
+      setMode('signin');
+      setErrorMessage('Password reset successful. Please sign in with your new password.');
+    } catch (reason: any) {
+      setErrorMessage(reason.message || 'Could not reset password.');
     } finally {
       setLoading(false);
     }
@@ -260,6 +326,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               <h1 style={styles.googleTitle}>
                 {subStep === 'otp'
                   ? 'Verify your phone'
+                  : subStep === 'password'
+                  ? 'Set your password'
+                  : subStep === 'reset'
+                  ? 'Reset your password'
+                  : subStep === 'call-requested'
+                  ? 'Call Requested'
                   : mode === 'create'
                   ? 'Create a Syscall Account'
                   : 'Sign in'}
@@ -270,22 +342,25 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   Enter the 6-digit code sent to{' '}
                   <strong style={{ color: '#1F1F1F' }}>+91 {raw10}</strong>
                 </p>
-              ) : mode === 'signin' ? (
+              ) : mode === 'signin' && subStep === 'form' ? (
+                <p style={styles.googleSubtitle}>to continue to Syscall Mail</p>
+              ) : mode === 'create' && subStep === 'form' ? (
                 <p style={styles.googleSubtitle}>to continue to Syscall Mail</p>
               ) : null}
 
               {subStep === 'otp' && (
                 <div style={styles.accountIdentityPill}>
                   <div style={styles.accountPillAvatar}>
-                    {getInitials(fullName || localStorage.getItem(`syscall_name_${raw10}`) || 'Akshat Joshi')}
+                    {getInitials(fullName || 'Akshat Joshi')}
                   </div>
                   <span style={styles.accountPillText}>
-                    {fullName ? `${fullName} • ` : ''}+91 {raw10}
+                    {fullName ? `${fullName} · ` : ''}+91 {raw10}
                   </span>
                   <button
                     style={styles.accountChangeBtn}
                     onClick={() => setSubStep('form')}
                     title="Change phone"
+                    type="button"
                   >
                     Edit
                   </button>
@@ -339,69 +414,92 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   </div>
                   {raw10.length === 10 && (
                     <span style={styles.phoneMailPreview}>
-                      Your PhoneMail: <strong>{raw10}@niti</strong>
+                      Your Syscall address: <strong>{raw10}@niti</strong>
                     </span>
                   )}
                 </div>
 
-                {/* Password & Confirm */}
+                {/* Password & Confirm Password */}
                 <div style={styles.inputWrapper}>
                   <label style={styles.fieldLabel}>Password</label>
-                  <div style={styles.passwordRow}>
-                    <div style={{ ...styles.materialOutlineField, flex: 1 }}>
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="At least 6 chars"
-                        style={{ ...styles.phoneInputField, paddingLeft: 14 }}
-                      />
-                    </div>
-                    <div style={{ ...styles.materialOutlineField, flex: 1 }}>
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Confirm password"
-                        style={{ ...styles.phoneInputField, paddingLeft: 14 }}
-                      />
-                    </div>
+                  <div style={styles.materialOutlineField}>
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Create a secure password"
+                      style={{ ...styles.phoneInputField, paddingLeft: 14 }}
+                    />
+                    <button
+                      type="button"
+                      style={styles.eyeToggleBtn}
+                      onClick={() => setShowPassword(!showPassword)}
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <IconEyeOff size={18} color="#444746" /> : <IconEye size={18} color="#444746" />}
+                    </button>
                   </div>
-                  <PasswordStrengthMeter strength={pwdStrength} />
                 </div>
 
-                {/* Show password toggle */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#444746' }}>
-                  <input
-                    type="checkbox"
-                    id="showPassCreate"
-                    checked={showPassword}
-                    onChange={(e) => setShowPassword(e.target.checked)}
-                    style={{ width: 16, height: 16, cursor: 'pointer' }}
-                  />
-                  <label htmlFor="showPassCreate" style={{ cursor: 'pointer' }}>Show password</label>
+                {/* Interactive Password Strength Meter */}
+                {password.length > 0 && (
+                  <PasswordStrengthMeter strength={getPasswordStrength(password)} />
+                )}
+
+                <div style={styles.inputWrapper}>
+                  <label style={styles.fieldLabel}>Confirm password</label>
+                  <div style={styles.materialOutlineField}>
+                    <input
+                      type={showConfirmPassword ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter password"
+                      style={{ ...styles.phoneInputField, paddingLeft: 14 }}
+                    />
+                    <button
+                      type="button"
+                      style={styles.eyeToggleBtn}
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showConfirmPassword ? <IconEyeOff size={18} color="#444746" /> : <IconEye size={18} color="#444746" />}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Bottom Actions */}
                 <div style={styles.bottomActions}>
                   <button
                     type="button"
-                    onClick={handleSwitchToSignIn}
                     style={styles.textActionBtn}
+                    onClick={handleSwitchToSignIn}
                   >
                     Sign in instead
                   </button>
-
                   <button
                     type="submit"
-                    disabled={loading}
                     style={{
                       ...styles.primaryActionBtn,
                       opacity: loading ? 0.7 : 1,
                       cursor: loading ? 'not-allowed' : 'pointer',
                     }}
+                    disabled={loading}
                   >
-                    {loading ? 'Creating...' : 'Next'}
+                    {loading ? 'Sending code...' : 'Next'}
+                  </button>
+                </div>
+
+                {/* Voice Onboarding Alternative */}
+                <div style={styles.voiceSetupRow}>
+                  <button
+                    type="button"
+                    style={styles.voiceSetupBtn}
+                    onClick={handleRequestVoiceSetup}
+                    disabled={loading}
+                    title="Have our voice assistant call your phone to verify and create your account"
+                  >
+                    <IconPhone size={14} color="#0B57D0" />
+                    <span>Or request an automated voice setup call</span>
                   </button>
                 </div>
               </form>
@@ -410,6 +508,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             {/* 2. SIGN IN FORM */}
             {mode === 'signin' && subStep === 'form' && (
               <form onSubmit={handleSignInNext} style={styles.formStack}>
+                {/* Phone */}
                 <div style={styles.inputWrapper}>
                   <label style={styles.fieldLabel}>Mobile number</label>
                   <div style={styles.materialOutlineField}>
@@ -430,6 +529,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   </div>
                 </div>
 
+                {/* Password vs OTP */}
                 {!signInWithOtp ? (
                   <div style={styles.inputWrapper}>
                     <label style={styles.fieldLabel}>Password</label>
@@ -438,41 +538,50 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                         type={showPassword ? 'text' : 'password'}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Enter password"
+                        placeholder="Enter your password"
                         style={{ ...styles.phoneInputField, paddingLeft: 14 }}
                       />
                       <button
                         type="button"
-                        onClick={() => setShowPassword(!showPassword)}
                         style={styles.eyeToggleBtn}
+                        onClick={() => setShowPassword(!showPassword)}
                         title={showPassword ? 'Hide password' : 'Show password'}
                       >
                         {showPassword ? <IconEyeOff size={18} color="#444746" /> : <IconEye size={18} color="#444746" />}
                       </button>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 6 }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
                       <button
                         type="button"
-                        onClick={() => setSignInWithOtp(true)}
                         style={styles.textActionBtnSmall}
+                        onClick={() => void requestOtp(true)}
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
+                      <button
+                        type="button"
+                        style={styles.textActionBtnSmall}
+                        onClick={() => setSignInWithOtp(true)}
                       >
                         Sign in with OTP instead
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div style={styles.otpNoticeBox}>
-                      <span>We will send a 6-digit one-time code to <strong>+91 {raw10 || '...'}</strong></span>
+                      We will send a 6-digit verification code to{' '}
+                      <strong>+91 {raw10 || '...'}</strong>
                     </div>
-
-                    {/* Prominent Use Password button */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+                    <div>
                       <button
                         type="button"
-                        onClick={() => setSignInWithOtp(false)}
                         style={styles.usePasswordBtn}
+                        onClick={() => setSignInWithOtp(false)}
                       >
                         Use password instead
                       </button>
@@ -484,83 +593,184 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <div style={styles.bottomActions}>
                   <button
                     type="button"
-                    onClick={handleSwitchToCreate}
                     style={styles.textActionBtn}
+                    onClick={handleSwitchToCreate}
                   >
                     Create account
                   </button>
-
                   <button
                     type="submit"
-                    disabled={loading}
                     style={{
                       ...styles.primaryActionBtn,
                       opacity: loading ? 0.7 : 1,
                       cursor: loading ? 'not-allowed' : 'pointer',
                     }}
+                    disabled={loading}
                   >
-                    {loading ? 'Signing in...' : signInWithOtp ? 'Get Code' : 'Next'}
+                    {loading
+                      ? 'Signing in...'
+                      : signInWithOtp
+                      ? 'Get Code'
+                      : 'Next'}
                   </button>
                 </div>
               </form>
             )}
 
-            {/* 3. OTP VERIFICATION STEP */}
+            {/* 3. OTP VERIFICATION SUBSTEP */}
             {subStep === 'otp' && (
-              <form onSubmit={(e) => { e.preventDefault(); handleVerifyOtp(); }} style={styles.formStack}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', width: '100%' }}>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleVerifyOtp();
+                }}
+                style={styles.formStack}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
                   <span style={styles.fieldLabel}>Enter 6-digit verification code</span>
                   <OtpInputGroup
                     otpDigits={otpDigits}
                     onChangeDigits={setOtpDigits}
-                    onComplete={(code) => handleVerifyOtp(code)}
-                    onEnter={() => handleVerifyOtp()}
+                    onComplete={(code) => void handleVerifyOtp(code)}
+                    onEnter={() => void handleVerifyOtp()}
                   />
                 </div>
 
                 <div style={styles.resendRow}>
                   {resendCooldown > 0 ? (
-                    <span style={styles.resendCooldownText}>Resend code in {resendCooldown}s</span>
+                    <span style={styles.resendCooldownText}>
+                      Resend code in {resendCooldown}s
+                    </span>
                   ) : (
                     <button
                       type="button"
-                      onClick={handleResendOtp}
                       style={styles.resendActiveBtn}
+                      onClick={() => void handleResendOtp()}
                     >
                       Resend code
                     </button>
                   )}
                 </div>
 
-                {/* Bottom Actions */}
                 <div style={styles.bottomActions}>
                   <button
                     type="button"
-                    onClick={() => setSubStep('form')}
                     style={styles.textActionBtn}
+                    onClick={() => setSubStep('form')}
                   >
                     Back
                   </button>
-
                   <button
                     type="submit"
-                    disabled={loading || otpDigits.some((d) => d === '')}
                     style={{
                       ...styles.primaryActionBtn,
-                      opacity: loading || otpDigits.some((d) => d === '') ? 0.6 : 1,
-                      cursor: loading || otpDigits.some((d) => d === '') ? 'not-allowed' : 'pointer',
+                      opacity: loading || otpDigits.some((d) => !d) ? 0.6 : 1,
+                      cursor: loading ? 'not-allowed' : 'pointer',
                     }}
+                    disabled={loading || otpDigits.some((d) => !d)}
                   >
                     {loading ? 'Verifying...' : 'Verify & Continue'}
                   </button>
                 </div>
               </form>
             )}
+
+            {/* 4. SET PASSWORD SUBSTEP */}
+            {subStep === 'password' && (
+              <form onSubmit={handleSetPassword} style={styles.formStack}>
+                <div style={styles.inputWrapper}>
+                  <label style={styles.fieldLabel}>New password</label>
+                  <div style={styles.materialOutlineField}>
+                    <input
+                      required
+                      type={showPassword ? 'text' : 'password'}
+                      minLength={8}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="At least 8 characters"
+                      style={{ ...styles.phoneInputField, paddingLeft: 14 }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      style={styles.eyeToggleBtn}
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <IconEyeOff size={18} color="#444746" /> : <IconEye size={18} color="#444746" />}
+                    </button>
+                  </div>
+                </div>
+
+                {password.length > 0 && <PasswordStrengthMeter strength={getPasswordStrength(password)} />}
+
+                <div style={styles.bottomActions}>
+                  <span />
+                  <button type="submit" disabled={loading} style={styles.primaryActionBtn}>
+                    {loading ? 'Saving...' : 'Set password'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* 5. RESET PASSWORD FROM URL TOKEN SUBSTEP */}
+            {subStep === 'reset' && (
+              <form onSubmit={handleCompleteReset} style={styles.formStack}>
+                <div style={styles.inputWrapper}>
+                  <label style={styles.fieldLabel}>New password</label>
+                  <div style={styles.materialOutlineField}>
+                    <input
+                      required
+                      type={showPassword ? 'text' : 'password'}
+                      minLength={8}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="At least 8 characters"
+                      style={{ ...styles.phoneInputField, paddingLeft: 14 }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      style={styles.eyeToggleBtn}
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <IconEyeOff size={18} color="#444746" /> : <IconEye size={18} color="#444746" />}
+                    </button>
+                  </div>
+                </div>
+
+                {password.length > 0 && <PasswordStrengthMeter strength={getPasswordStrength(password)} />}
+
+                <div style={styles.bottomActions}>
+                  <button type="button" onClick={() => handleSwitchToSignIn()} style={styles.textActionBtn}>
+                    Back to sign in
+                  </button>
+                  <button type="submit" disabled={loading} style={styles.primaryActionBtn}>
+                    {loading ? 'Resetting...' : 'Reset password'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* 6. CALL REQUESTED NOTICE SUBSTEP */}
+            {subStep === 'call-requested' && (
+              <div style={styles.formStack}>
+                <div style={styles.otpNoticeBox}>
+                  Your automated onboarding call has been requested. When your phone rings, the voice assistant will confirm your name <strong>"{fullName.trim()}"</strong> and set up your account.
+                </div>
+                <div style={styles.bottomActions}>
+                  <button type="button" onClick={() => handleSwitchToSignIn()} style={styles.textActionBtn}>
+                    Back to sign in
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Right 70% Panel */}
+      {/* Right 70% Panel: Visual Brand Illustration & Features */}
       <AuthBrandPanel />
     </div>
   );
@@ -687,7 +897,7 @@ const styles: Record<string, React.CSSProperties> = {
   formStack: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px',
+    gap: '18px',
     width: '100%',
   },
   inputWrapper: {
@@ -740,10 +950,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     outline: 'none',
     backgroundColor: 'transparent',
-  },
-  passwordRow: {
-    display: 'flex',
-    gap: '10px',
   },
   eyeToggleBtn: {
     display: 'flex',
@@ -801,12 +1007,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #EDF2FA',
     fontSize: '13px',
     color: '#444746',
+    lineHeight: '1.4',
   },
   bottomActions: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: '12px',
+    marginTop: '8px',
     gap: '12px',
   },
   primaryActionBtn: {
@@ -823,6 +1030,25 @@ const styles: Record<string, React.CSSProperties> = {
     border: 'none',
     boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
     transition: 'all 0.15s ease',
+  },
+  voiceSetupRow: {
+    display: 'flex',
+    justifyContent: 'center',
+    marginTop: '6px',
+  },
+  voiceSetupBtn: {
+    background: 'none',
+    border: 'none',
+    color: '#0B57D0',
+    fontSize: '12.5px',
+    fontWeight: 500,
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    padding: '6px 10px',
+    borderRadius: '6px',
+    transition: 'background-color 0.15s ease',
   },
   resendRow: {
     display: 'flex',

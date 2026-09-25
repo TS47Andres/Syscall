@@ -1,3 +1,8 @@
+/**
+ * File: MailLayout.tsx
+ * Role: Composes the authenticated shell and wires compose actions to the API context.
+ * Service: Frontend.
+ */
 import React from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useMail } from '../context/MailContext';
@@ -26,6 +31,8 @@ export const MailLayout: React.FC = () => {
     composePrefill,
     setComposePrefill,
     handleSendMail,
+    handleSaveDraft,
+    handleScheduleMail,
     handleSignOut,
   } = useMail();
 
@@ -109,12 +116,16 @@ export const MailLayout: React.FC = () => {
             setIsComposeOpen(false);
             setComposePrefill(null);
           }}
-          onSent={(mail) => {
-            handleSendMail(mail.to, mail.subject, mail.textBody);
-            setIsComposeOpen(false);
-            setComposePrefill(null);
-          }}
+          onSent={(mail) => handleSendMail(mail.to, mail.subject, mail.textBody, mail.attachments, mail.replyToId, mail.draftId)}
+          onSaveDraft={(draft) => handleSaveDraft(draft.to, draft.subject, draft.textBody, draft.attachments, draft.draftId)}
+          onSchedule={(message) => handleScheduleMail(message.to, message.subject, message.textBody, message.scheduledAt, message.attachments)}
           initialTo={composePrefill?.to || ''}
+          initialSubject={composePrefill?.subject || ''}
+          initialBody={composePrefill?.body || ''}
+          replyToId={composePrefill?.replyToId}
+          draftId={composePrefill?.draftId}
+          initialAttachments={composePrefill?.draftAttachments}
+          mailDomain={currentUser.emailAddress.split('@')[1] || 'niti'}
         />
       )}
     </div>

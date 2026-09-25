@@ -1,3 +1,8 @@
+/**
+ * File: ReadingPane.tsx
+ * Role: Displays real mail content and actions for replies, trash, spam, and schedules.
+ * Service: Frontend.
+ */
 import React from 'react';
 import type { Email } from '../../types';
 import {
@@ -6,6 +11,7 @@ import {
   IconReply,
   IconForward,
   IconLink,
+  IconSpam,
 } from '../Icons';
 import { AttachmentCard } from './AttachmentCard';
 import { VoicemailPlayer } from './VoicemailPlayer';
@@ -17,7 +23,12 @@ interface ReadingPaneProps {
   onMoveToBin: (id: string) => void;
   onRestoreFromBin: (id: string) => void;
   onPermanentDelete: (id: string) => void;
-  onReply: (to: string, subject: string) => void;
+  onReply: (to: string, subject: string, replyToId?: string) => void;
+  onCancelScheduled?: (id: string) => void;
+  onRescheduleScheduled?: (id: string, scheduledAt: string) => void;
+  canReportSpam?: boolean;
+  onToggleSpam?: (id: string, spam: boolean) => void;
+  userAddress: string;
 }
 
 export const renderFormattedText = (text: string, onReply?: (to: string) => void) => {
@@ -83,11 +94,28 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
   onRestoreFromBin,
   onPermanentDelete,
   onReply,
+  onCancelScheduled,
+  onRescheduleScheduled,
+  canReportSpam = false,
+  onToggleSpam,
+  userAddress,
 }) => {
   const formatPhone = (addr: string) => {
     const raw = addr.replace(/\D/g, '').slice(-10);
     return raw.length === 10 ? `+91 ${raw.slice(0, 5)} ${raw.slice(5)}` : addr;
   };
+
+  // Prompts for a new local delivery time and submits a valid future ISO timestamp.
+  const requestReschedule = (): void => {
+    const value = window.prompt('Enter a new delivery time in your local timezone (example: 2026-10-01 14:30):');
+    if (!value) return;
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) { window.alert('Enter a valid future date and time.'); return; }
+    onRescheduleScheduled?.(email.publicId, date.toISOString());
+  };
+
+  // Chooses the other participant as the default reply destination.
+  const replyAddress = email.senderAddress === userAddress ? email.recipientAddress : email.senderAddress;
 
   const getAvatarBg = (address: string) => {
     const colors = ['#E8DEF8', '#D3E3FD', '#C2E7FF', '#C4EDD9', '#FFD8D8', '#FFE7A5', '#E0F2FE'];
@@ -115,7 +143,12 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
         </button>
 
         <div style={styles.toolbarRight}>
-          {folder === 'bin' || folder === 'trash' ? (
+          {folder === 'scheduled' ? (
+            <>
+              <button style={styles.restoreBtn} onClick={requestReschedule}>Reschedule</button>
+              <button style={styles.deleteForeverBtn} onClick={() => onCancelScheduled?.(email.publicId)}>Cancel schedule</button>
+            </>
+          ) : folder === 'bin' || folder === 'trash' ? (
             <>
               <button
                 style={styles.restoreBtn}
@@ -141,9 +174,10 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
               >
                 <IconTrash size={18} color="#444746" />
               </button>
+              {canReportSpam && <button style={styles.toolbarIconBtn} onClick={() => onToggleSpam?.(email.publicId, !email.isSpam)} title={email.isSpam ? 'Not spam' : 'Report spam'}><IconSpam size={18} color={email.isSpam ? '#BA1A1A' : '#444746'} /></button>}
               <button
                 style={styles.replyHeaderBtn}
-                onClick={() => onReply(email.senderAddress, `Re: ${email.subject}`)}
+                onClick={() => onReply(replyAddress, `Re: ${email.subject}`, email.publicId)}
                 title="Reply to email"
               >
                 <IconReply size={14} color="#1F1F1F" />
@@ -205,7 +239,7 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
         <div style={styles.emailBodyTypography}>
           {email.textBody.split('\n\n').map((paragraph, index) => (
             <p key={index} style={{ marginBottom: 14 }}>
-              {renderFormattedText(paragraph, (addr) => onReply(addr, `Re: ${email.subject}`))}
+              {renderFormattedText(paragraph, (addr) => onReply(addr, '', undefined))}
             </p>
           ))}
         </div>
@@ -218,7 +252,7 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
             </span>
             <div style={styles.attachmentsGrid}>
               {email.attachments.map((file, i) => (
-                <AttachmentCard key={i} attachment={file} />
+                <AttachmentCard key={i} attachment={file} messageId={email.publicId} attachmentIndex={i} />
               ))}
             </div>
           </div>
@@ -228,7 +262,7 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
         <div style={styles.bottomActions}>
           <button
             style={styles.bottomActionBtn}
-            onClick={() => onReply(email.senderAddress, `Re: ${email.subject}`)}
+            onClick={() => onReply(replyAddress, `Re: ${email.subject}`, email.publicId)}
           >
             <IconReply size={14} color="#1F1F1F" />
             <span>Reply</span>

@@ -1,3 +1,8 @@
+/**
+ * File: types.ts
+ * Role: Declares frontend DTOs shared by mailbox and authentication views.
+ * Service: Frontend.
+ */
 export interface User {
   id: string;
   phone: string;
@@ -26,6 +31,12 @@ export interface Email {
   isSpam?: boolean;
   createdAt: string;
   attachments?: Attachment[];
+  isStarred?: boolean;
+  isTrashed?: boolean;
+  deliveryStatus?: 'scheduled' | 'queued' | 'delivered' | 'failed' | 'cancelled';
+  scheduledAt?: string | null;
+  isDraft?: boolean;
+  inReplyTo?: string | null;
 }
 
 export interface Draft {
@@ -34,6 +45,7 @@ export interface Draft {
   subject: string;
   textBody: string;
   updatedAt: string;
+  attachments?: Attachment[];
 }
 
 export interface HealthState {
@@ -45,8 +57,8 @@ export interface HealthState {
   apiPort: number;
 }
 
-// Helper to compute initials: first letter of name + first letter of surname (e.g. Akshat Joshi -> AJ)
-export const getInitials = (name?: string, fallback = 'AJ'): string => {
+// Computes display initials from a persisted account name.
+export const getInitials = (name?: string, fallback = 'SY'): string => {
   if (!name || !name.trim()) return fallback;
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 1) {

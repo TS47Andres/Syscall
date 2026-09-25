@@ -1,6 +1,11 @@
+/**
+ * File: MailContext.tsx
+ * Role: Loads and mutates authenticated mailbox state through backend APIs.
+ * Service: Frontend.
+ */
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import type { User, Email } from '../types';
-import { api, createWelcomeEmail } from '../api';
+import type { User, Email, Draft, Attachment } from '../types';
+import { api } from '../api';
 import type { TabCategory } from '../components/mail/CategoryTabs';
 
 interface MailContextType {
@@ -9,39 +14,44 @@ interface MailContextType {
   starredIds: Set<string>;
   trashIds: Set<string>;
   searchQuery: string;
-  setSearchQuery: (q: string) => void;
+  setSearchQuery: (query: string) => void;
   isDrawerOpen: boolean;
   setIsDrawerOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   isSidebarCollapsed: boolean;
   setIsSidebarCollapsed: (collapsed: boolean | ((prev: boolean) => boolean)) => void;
   isComposeOpen: boolean;
   setIsComposeOpen: (open: boolean) => void;
-  composePrefill: { to?: string; subject?: string } | null;
-  setComposePrefill: (prefill: { to?: string; subject?: string } | null) => void;
+  composePrefill: { to?: string; subject?: string; body?: string; replyToId?: string; draftId?: string; draftAttachments?: Attachment[] } | null;
+  setComposePrefill: (prefill: { to?: string; subject?: string; body?: string; replyToId?: string; draftId?: string; draftAttachments?: Attachment[] } | null) => void;
   categoryTab: TabCategory;
   setCategoryTab: (tab: TabCategory) => void;
   refreshing: boolean;
+  loadError: string | null;
   loadMail: () => Promise<void>;
   handleMoveToBin: (id: string) => void;
   handleRestoreFromBin: (id: string) => void;
   handlePermanentDelete: (id: string) => void;
   handleEmptyBin: () => void;
-  handleToggleStar: (id: string, e?: React.MouseEvent) => void;
-  handleSendMail: (to: string, subject: string, body: string, attachments?: File[]) => Promise<void>;
-  handleUpdateName: (newName: string) => void;
-  handleUpdatePhoto: (photoUrl: string) => void;
+  handleToggleStar: (id: string, event?: React.MouseEvent) => void;
+  handleToggleSpam: (id: string, spam: boolean) => void;
+  handleSendMail: (to: string, subject: string, body: string, attachments?: File[], replyToId?: string, draftId?: string) => Promise<void>;
+  handleSaveDraft: (to: string, subject: string, body: string, attachments?: File[], draftId?: string) => Promise<void>;
+  handleScheduleMail: (to: string, subject: string, body: string, scheduledAt: string, attachments?: File[]) => Promise<void>;
+  handleCancelScheduled: (id: string) => Promise<void>;
+  handleRescheduleScheduled: (id: string, scheduledAt: string) => Promise<void>;
+  handleUpdateName: (newName: string) => Promise<void>;
+  handleUpdatePhoto: (photoUrl: string) => Promise<void>;
   handleSignOut: () => void;
 }
 
 const MailContext = createContext<MailContextType | null>(null);
 
-export const useMail = () => {
+// Returns mailbox context only when its authenticated provider is present.
+export function useMail(): MailContextType {
   const context = useContext(MailContext);
-  if (!context) {
-    throw new Error('useMail must be used within a MailProvider');
-  }
+  if (!context) throw new Error('useMail must be used within a MailProvider');
   return context;
-};
+}
 
 interface MailProviderProps {
   initialUser: User;
@@ -49,236 +59,129 @@ interface MailProviderProps {
   children: React.ReactNode;
 }
 
-export const MailProvider: React.FC<MailProviderProps> = ({
-  initialUser,
-  onSignOut,
-  children,
-}) => {
-  const [currentUser, setCurrentUser] = useState<User>(() => {
-    const savedName = localStorage.getItem(`syscall_name_${initialUser.phone}`);
-    const savedAvatar = localStorage.getItem(`syscall_avatar_${initialUser.phone}`);
-    return {
-      ...initialUser,
-      name: savedName || initialUser.name || 'Akshat Joshi',
-      avatarUrl: savedAvatar || initialUser.avatarUrl,
-    };
-  });
-
-  const [emails, setEmails] = useState<Email[]>(() => {
-    const local = localStorage.getItem(`syscall_emails_${initialUser.phone}`);
-    if (local) {
-      try {
-        return JSON.parse(local);
-      } catch {}
-    }
-    const welcome = createWelcomeEmail(initialUser.phone);
-    return [welcome];
-  });
-
-  const [starredIds, setStarredIds] = useState<Set<string>>(() => {
-    const local = localStorage.getItem(`syscall_starred_${initialUser.phone}`);
-    if (local) {
-      try {
-        return new Set(JSON.parse(local));
-      } catch {}
-    }
-    return new Set<string>();
-  });
-
-  const [trashIds, setTrashIds] = useState<Set<string>>(() => {
-    const local = localStorage.getItem(`syscall_bin_${initialUser.phone}`) || localStorage.getItem(`syscall_trash_${initialUser.phone}`);
-    if (local) {
-      try {
-        return new Set(JSON.parse(local));
-      } catch {}
-    }
-    return new Set<string>();
-  });
-
-  const [searchQuery, setSearchQuery] = useState<string>('');
+export const MailProvider: React.FC<MailProviderProps> = ({ initialUser, onSignOut, children }) => {
+  const [currentUser, setCurrentUser] = useState<User>(initialUser);
+  const [emails, setEmails] = useState<Email[]>([]);
+  const [trashIds, setTrashIds] = useState<Set<string>>(new Set());
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
   const [categoryTab, setCategoryTab] = useState<TabCategory>('all');
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [isComposeOpen, setIsComposeOpen] = useState<boolean>(false);
-  const [composePrefill, setComposePrefill] = useState<{ to?: string; subject?: string } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isComposeOpen, setIsComposeOpen] = useState(false);
+  const [composePrefill, setComposePrefill] = useState<{ to?: string; subject?: string; body?: string; replyToId?: string; draftId?: string; draftAttachments?: Attachment[] } | null>(null);
 
-  const loadMail = useCallback(async () => {
+  // Replaces all mailbox collections with authoritative backend responses.
+  const loadMail = useCallback(async (): Promise<void> => {
     setRefreshing(true);
+    setLoadError(null);
     try {
-      const remote = await api.getMail(currentUser.phone);
-      if (remote && remote.length > 0) {
-        setEmails((prev) => {
-          const map = new Map(prev.map((e) => [e.publicId, e]));
-          for (const m of remote) {
-            map.set(m.publicId, m);
-          }
-          const merged = Array.from(map.values());
-          localStorage.setItem(`syscall_emails_${currentUser.phone}`, JSON.stringify(merged));
-          return merged;
-        });
-      }
-    } catch {
-      // Keep existing data
+      const [mail, trash, drafts, scheduled] = await Promise.all([api.getMail(), api.getTrash(), api.getDrafts(), api.getScheduled()]);
+      const trashed = trash.map((message) => ({ ...message, isTrashed: true }));
+      const draftMessages: Email[] = drafts.map((draft: Draft) => ({
+        publicId: draft.publicId,
+        senderAddress: currentUser.emailAddress,
+        recipientAddress: draft.recipientAddress ?? '',
+        subject: draft.subject,
+        textBody: draft.textBody,
+        createdAt: draft.updatedAt,
+        readAt: draft.updatedAt,
+        isSpam: false,
+        isDraft: true,
+        attachments: draft.attachments,
+      }));
+      const scheduledMessages: Email[] = scheduled.map((email) => ({
+        ...email,
+        senderAddress: currentUser.emailAddress,
+        textBody: email.textBody ?? '',
+        readAt: email.createdAt,
+        isSpam: false,
+        deliveryStatus: 'scheduled',
+      }));
+      const combined = [...mail, ...trashed, ...draftMessages, ...scheduledMessages];
+      setEmails(combined);
+      setTrashIds(new Set(trashed.map((email) => email.publicId)));
+      setStarredIds(new Set(combined.filter((email) => email.isStarred).map((email) => email.publicId)));
+    } catch (reason) {
+      setLoadError(reason instanceof Error ? reason.message : 'Could not load mailbox data.');
+      throw reason;
     } finally {
-      setTimeout(() => setRefreshing(false), 500);
+      setRefreshing(false);
     }
-  }, [currentUser.phone]);
+  }, [currentUser.emailAddress]);
+
+  useEffect(() => { void loadMail().catch(() => undefined); }, [loadMail]);
 
   useEffect(() => {
-    loadMail();
+    let cancelled = false;
+    void api.getProfile().then((profile) => {
+      if (!cancelled) setCurrentUser((user) => ({ ...user, name: profile.name || user.name, avatarUrl: profile.avatarUrl || undefined }));
+    }).catch((reason: unknown) => {
+      if (!cancelled) setLoadError(reason instanceof Error ? reason.message : 'Could not load profile.');
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Moves one message to backend-owned recoverable trash, then refreshes visible folders.
+  const handleMoveToBin = useCallback((id: string): void => { void api.trashEmail(id).then(loadMail).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Could not move message to trash.')); }, [loadMail]);
+  // Restores one trashed message through the backend.
+  const handleRestoreFromBin = useCallback((id: string): void => { void api.restoreEmail(id).then(loadMail).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Could not restore message.')); }, [loadMail]);
+  // Permanently deletes the current participant's trashed copy.
+  const handlePermanentDelete = useCallback((id: string): void => { void api.permanentlyDeleteEmail(id).then(loadMail).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Could not permanently delete message.')); }, [loadMail]);
+  // Permanently deletes all messages in this participant's backend trash.
+  const handleEmptyBin = useCallback((): void => { void api.emptyTrash().then(loadMail).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Could not empty trash.')); }, [loadMail]);
+  // Persists the participant-specific star state.
+  const handleToggleStar = useCallback((id: string, event?: React.MouseEvent): void => {
+    event?.stopPropagation();
+    const starred = !starredIds.has(id);
+    void api.setStar(id, starred).then(loadMail).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Could not update star.'));
+  }, [loadMail, starredIds]);
+
+  // Persists recipient-owned spam classification and reloads affected folders.
+  const handleToggleSpam = useCallback((id: string, spam: boolean): void => { void api.setSpam(id, spam).then(loadMail).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Could not update spam status.')); }, [loadMail]);
+
+  // Queues a real message or threaded reply, then reloads mailbox state.
+  const handleSendMail = useCallback(async (to: string, subject: string, body: string, attachments?: File[], replyToId?: string, draftId?: string): Promise<void> => {
+    if (draftId) { await api.updateDraft(draftId, { recipientAddress: to, subject, textBody: body }, attachments); await api.sendDraft(draftId); }
+    else if (replyToId) await api.replyToEmail(replyToId, body, attachments ?? []);
+    else await api.sendMail(to, subject, body, attachments ?? []);
+    await loadMail();
   }, [loadMail]);
 
-  const handleMoveToBin = useCallback((mailId: string) => {
-    setTrashIds((prev) => {
-      const next = new Set(prev);
-      next.add(mailId);
-      localStorage.setItem(`syscall_bin_${currentUser.phone}`, JSON.stringify([...next]));
-      localStorage.setItem(`syscall_trash_${currentUser.phone}`, JSON.stringify([...next]));
-      return next;
-    });
-  }, [currentUser.phone]);
+  // Creates or updates a durable backend draft with all compose fields and attachments.
+  const handleSaveDraft = useCallback(async (to: string, subject: string, body: string, attachments?: File[], draftId?: string): Promise<void> => {
+    if (draftId) await api.updateDraft(draftId, { recipientAddress: to || null, subject, textBody: body }, attachments);
+    else await api.createDraft({ recipientAddress: to || null, subject, textBody: body }, attachments ?? []);
+    await loadMail();
+  }, [loadMail]);
 
-  const handleRestoreFromBin = useCallback((mailId: string) => {
-    setTrashIds((prev) => {
-      const next = new Set(prev);
-      next.delete(mailId);
-      localStorage.setItem(`syscall_bin_${currentUser.phone}`, JSON.stringify([...next]));
-      localStorage.setItem(`syscall_trash_${currentUser.phone}`, JSON.stringify([...next]));
-      return next;
-    });
-  }, [currentUser.phone]);
+  // Schedules a complete message through the durable backend scheduler.
+  const handleScheduleMail = useCallback(async (to: string, subject: string, body: string, scheduledAt: string, attachments?: File[]): Promise<void> => {
+    await api.scheduleMail({ to, subject, textBody: body, scheduledAt, attachments });
+    await loadMail();
+  }, [loadMail]);
 
-  const handlePermanentDelete = useCallback((mailId: string) => {
-    setEmails((prev) => {
-      const updated = prev.filter((m) => m.publicId !== mailId);
-      localStorage.setItem(`syscall_emails_${currentUser.phone}`, JSON.stringify(updated));
-      return updated;
-    });
-    setTrashIds((prev) => {
-      const next = new Set(prev);
-      next.delete(mailId);
-      localStorage.setItem(`syscall_bin_${currentUser.phone}`, JSON.stringify([...next]));
-      localStorage.setItem(`syscall_trash_${currentUser.phone}`, JSON.stringify([...next]));
-      return next;
-    });
-  }, [currentUser.phone]);
+  // Cancels a pending scheduled message through its owner-scoped API.
+  const handleCancelScheduled = useCallback(async (id: string): Promise<void> => { await api.cancelScheduledMail(id); await loadMail(); }, [loadMail]);
 
-  const handleEmptyBin = useCallback(() => {
-    setEmails((prev) => {
-      const updated = prev.filter((m) => !trashIds.has(m.publicId));
-      localStorage.setItem(`syscall_emails_${currentUser.phone}`, JSON.stringify(updated));
-      return updated;
-    });
-    setTrashIds(new Set());
-    localStorage.removeItem(`syscall_bin_${currentUser.phone}`);
-    localStorage.removeItem(`syscall_trash_${currentUser.phone}`);
-  }, [currentUser.phone, trashIds]);
+  // Changes the delivery time of a pending scheduled message.
+  const handleRescheduleScheduled = useCallback(async (id: string, scheduledAt: string): Promise<void> => { await api.rescheduleMail(id, scheduledAt); await loadMail(); }, [loadMail]);
 
-  const handleToggleStar = useCallback((id: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    setStarredIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      localStorage.setItem(`syscall_starred_${currentUser.phone}`, JSON.stringify([...next]));
-      return next;
-    });
-  }, [currentUser.phone]);
+  // Saves a profile name on the backend before updating in-memory display state.
+  const handleUpdateName = useCallback(async (newName: string): Promise<void> => {
+    try { await api.updateProfile({ name: newName }); setCurrentUser((user) => ({ ...user, name: newName })); }
+    catch (reason) { const message = reason instanceof Error ? reason.message : 'Could not update name.'; setLoadError(message); throw new Error(message); }
+  }, []);
 
-  const handleSendMail = useCallback(async (
-    to: string,
-    subject: string,
-    body: string,
-    attachments?: File[]
-  ) => {
-    const rawTo10 = to.replace(/@.*$/, '').replace(/\D/g, '').slice(-10);
-    const destinationAddress = `${rawTo10}@niti`;
-    const cleanSubject = subject.trim() || '(No Subject)';
-    const nowIso = new Date().toISOString();
+  // Saves a JPEG data URL through the authenticated profile API.
+  const handleUpdatePhoto = useCallback(async (photoUrl: string): Promise<void> => {
+    const avatarBase64 = photoUrl.split(',')[1];
+    if (!avatarBase64) throw new Error('Profile photo data is invalid.');
+    try { await api.updateProfile({ avatarBase64 }); setCurrentUser((user) => ({ ...user, avatarUrl: photoUrl })); }
+    catch (reason) { const message = reason instanceof Error ? reason.message : 'Could not update profile photo.'; setLoadError(message); throw new Error(message); }
+  }, []);
 
-    const mockAttachments = attachments?.map((f) => ({
-      filename: f.name,
-      contentType: f.type || 'application/octet-stream',
-      sizeBytes: f.size,
-      clamavStatus: 'clean' as const,
-    })) || [];
-
-    const newSentEmail: Email = {
-      publicId: `sent-${Date.now()}`,
-      senderAddress: currentUser.emailAddress,
-      recipientAddress: destinationAddress,
-      subject: cleanSubject,
-      textBody: body,
-      createdAt: nowIso,
-      readAt: nowIso,
-      isSpam: false,
-      attachments: mockAttachments,
-    };
-
-    setEmails((prev) => {
-      const updated = [newSentEmail, ...prev];
-      localStorage.setItem(`syscall_emails_${currentUser.phone}`, JSON.stringify(updated));
-      return updated;
-    });
-
-    try {
-      await api.sendMail(destinationAddress, cleanSubject, body);
-    } catch {
-      // Local copy saved
-    }
-  }, [currentUser]);
-
-  const handleUpdateName = useCallback((newName: string) => {
-    setCurrentUser((prev) => ({ ...prev, name: newName }));
-    localStorage.setItem(`syscall_name_${currentUser.phone}`, newName);
-  }, [currentUser.phone]);
-
-  const handleUpdatePhoto = useCallback((photoUrl: string) => {
-    setCurrentUser((prev) => ({ ...prev, avatarUrl: photoUrl }));
-    try {
-      localStorage.setItem(`syscall_avatar_${currentUser.phone}`, photoUrl);
-    } catch {
-      // LocalStorage quota safety
-    }
-  }, [currentUser.phone]);
-
-  return (
-    <MailContext.Provider
-      value={{
-        currentUser,
-        emails,
-        starredIds,
-        trashIds,
-        searchQuery,
-        setSearchQuery,
-        isDrawerOpen,
-        setIsDrawerOpen,
-        isSidebarCollapsed,
-        setIsSidebarCollapsed,
-        isComposeOpen,
-        setIsComposeOpen,
-        composePrefill,
-        setComposePrefill,
-        categoryTab,
-        setCategoryTab,
-        refreshing,
-        loadMail,
-        handleMoveToBin,
-        handleRestoreFromBin,
-        handlePermanentDelete,
-        handleEmptyBin,
-        handleToggleStar,
-        handleSendMail,
-        handleUpdateName,
-        handleUpdatePhoto,
-        handleSignOut: onSignOut,
-      }}
-    >
-      {children}
-    </MailContext.Provider>
-  );
+  return <MailContext.Provider value={{ currentUser, emails, starredIds, trashIds, searchQuery, setSearchQuery, isDrawerOpen, setIsDrawerOpen, isSidebarCollapsed, setIsSidebarCollapsed, isComposeOpen, setIsComposeOpen, composePrefill, setComposePrefill, categoryTab, setCategoryTab, refreshing, loadError, loadMail, handleMoveToBin, handleRestoreFromBin, handlePermanentDelete, handleEmptyBin, handleToggleStar, handleToggleSpam, handleSendMail, handleSaveDraft, handleScheduleMail, handleCancelScheduled, handleRescheduleScheduled, handleUpdateName, handleUpdatePhoto, handleSignOut: onSignOut }}>{children}</MailContext.Provider>;
 };

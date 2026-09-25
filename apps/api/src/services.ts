@@ -10,7 +10,7 @@ import type { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
 import { AuditLog, Draft, Email, ResetToken, User, type EmailDocument, type UserDocument, type AttachmentMetadata } from '@syscall/db';
 import { toLocalAddress, toPhone10, toPhoneE164, passwordSchema } from '@syscall/validation';
-import { writeGeneratedFile, validateAttachment } from '@syscall/mail';
+import { writeGeneratedFile, removeGeneratedFile, validateAttachment } from '@syscall/mail';
 import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue, enqueueScheduledEmail, scheduledEmailJobId, type SmsSendJob } from '@syscall/queues';
 import type { AppConfig } from '@syscall/config';
 import { createLogger } from '@syscall/logging';
@@ -36,12 +36,12 @@ export async function audit(eventType: string, actorUserId: UserDocument['_id'] 
 }
 
 // Creates or returns the one canonical account for an Indian phone number.
-export async function ensureUserForPhone(config: AppConfig, phone: string): Promise<{ user: UserDocument; created: boolean }> {
+export async function ensureUserForPhone(config: AppConfig, phone: string, displayName?: string): Promise<{ user: UserDocument; created: boolean }> {
   const phoneE164 = toPhoneE164(phone);
   const phone10Digit = toPhone10(phoneE164);
   const existing = await User.findOne({ phoneE164 });
   if (existing) return { user: existing, created: false };
-  const user = await User.create({ phoneE164, phone10Digit, emailAddress: toLocalAddress(phone10Digit, config.LOCAL_MAIL_DOMAIN), passwordHash: null, passwordConfigured: false });
+  const user = await User.create({ phoneE164, phone10Digit, emailAddress: toLocalAddress(phone10Digit, config.LOCAL_MAIL_DOMAIN), displayName: displayName?.trim() ?? '', passwordHash: null, passwordConfigured: false });
   return { user, created: true };
 }
 
@@ -155,10 +155,10 @@ export async function persistAttachments(context: ServiceContext, attachments: A
 }
 
 // Builds an email record owned by the authenticated sender before queueing delivery.
-export async function queueEmail(context: ServiceContext, sender: UserDocument, recipientAddress: string, subject: string, textBody: string, htmlBody: string | null, attachments: AttachmentMetadata[], failureNotification?: { phoneE164: string; recipientPhone10: string; dedupeKey: string }): Promise<string> {
+export async function queueEmail(context: ServiceContext, sender: UserDocument, recipientAddress: string, subject: string, textBody: string, htmlBody: string | null, attachments: AttachmentMetadata[], failureNotification?: { phoneE164: string; recipientPhone10: string; dedupeKey: string }, thread?: { inReplyTo: string; references: string[] }): Promise<string> {
   const recipient = await User.findOne({ emailAddress: recipientAddress, accountStatus: 'active' });
   if (!recipient) throw new Error('Recipient must be an existing active @niti user.');
-  const email = await Email.create({ senderUserId: sender._id, senderAddress: sender.emailAddress, recipientUserId: recipient._id, recipientAddress, subject, textBody, htmlBody, attachments, rawMimePath: '', messageIdHeader: `<${uuidv7()}@${context.config.LOCAL_MAIL_DOMAIN}>`, deliveryStatus: 'queued' });
+  const email = await Email.create({ senderUserId: sender._id, senderAddress: sender.emailAddress, recipientUserId: recipient._id, recipientAddress, subject, textBody, htmlBody, attachments, rawMimePath: '', messageIdHeader: `<${uuidv7()}@${context.config.LOCAL_MAIL_DOMAIN}>`, inReplyTo: thread?.inReplyTo ?? null, references: thread?.references ?? [], deliveryStatus: 'queued' });
   try {
     await context.outboundQueue.add('outbound-email', { emailId: email.publicId, ...(failureNotification ? { failureNotification } : {}) }, { attempts: 3, backoff: { type: 'custom' } });
   } catch (error) {

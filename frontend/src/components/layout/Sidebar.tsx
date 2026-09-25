@@ -1,3 +1,8 @@
+/**
+ * File: Sidebar.tsx
+ * Role: Navigates real mailbox folders and summarizes loaded backend records.
+ * Service: Frontend.
+ */
 import React from 'react';
 import {
   IconInbox,
@@ -176,13 +181,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'scheduled',
       label: 'Scheduled',
       icon: (act) => <IconScheduled size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
-      count: 0,
+      count: emails.filter((mail) => mail.deliveryStatus === 'scheduled').length,
     },
     {
       id: 'drafts',
       label: 'Drafts',
       icon: (act) => <IconDrafts size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
-      count: 0,
+      count: emails.filter((mail) => mail.isDraft).length,
     },
   ];
 

@@ -1,4 +1,9 @@
-import React from 'react';
+/**
+ * File: AttachmentCard.tsx
+ * Role: Displays attachment metadata and downloads bytes through authenticated API routes.
+ * Service: Frontend.
+ */
+import React, { useState } from 'react';
 import {
   IconFile,
   IconFilePdf,
@@ -10,11 +15,15 @@ import {
   IconShieldAlert,
 } from '../Icons';
 import type { Attachment } from '../../types';
+import { api } from '../../api';
 
 interface AttachmentCardProps {
   attachment: Attachment;
+  messageId: string;
+  attachmentIndex: number;
 }
 
+// Selects a compact visual for common attachment formats.
 export const getFileIcon = (filename: string, isInfected?: boolean) => {
   const ext = filename.split('.').pop()?.toLowerCase() || '';
   const color = isInfected ? '#DC2626' : undefined;
@@ -37,12 +46,28 @@ export const getFileIcon = (filename: string, isInfected?: boolean) => {
   return <IconFile size={22} color={color || '#0B57D0'} />;
 };
 
-export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) => {
+export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment, messageId, attachmentIndex }) => {
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const isInfected = attachment.clamavStatus === 'infected';
 
+  // Downloads attachment bytes through the authenticated API and releases the object URL.
+  const handleDownload = async (): Promise<void> => {
+    try {
+      const downloaded = await api.downloadAttachment('mail', messageId, attachmentIndex);
+      const url = URL.createObjectURL(downloaded.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloaded.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      setErrorMessage(null);
+    } catch (reason) {
+      setErrorMessage(reason instanceof Error ? reason.message : 'Could not download attachment.');
+    }
+  };
+
   return (
-    <div style={styles.card}>
-      {/* File Icon with overlaid Green or Red Antivirus Scan Badge */}
+    <button type="button" style={styles.card} onClick={() => void handleDownload()} title="Download attachment">
       <div
         style={{
           ...styles.iconWrapper,
@@ -69,13 +94,14 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
         <strong style={styles.filename} title={attachment.filename}>
           {attachment.filename}
         </strong>
+        {errorMessage && <div role="alert" style={styles.errorText}>{errorMessage}</div>}
         <div style={styles.metaRow}>
           <span style={styles.sizeText}>
             {(attachment.sizeBytes / 1024).toFixed(1)} KB
           </span>
         </div>
       </div>
-    </div>
+    </button>
   );
 };
 
@@ -89,6 +115,9 @@ const styles: Record<string, React.CSSProperties> = {
     border: '1px solid #E0E2EC',
     backgroundColor: '#F8F9FA',
     minWidth: 0,
+    width: '100%',
+    textAlign: 'left',
+    cursor: 'pointer',
   },
   iconWrapper: {
     position: 'relative',
@@ -130,5 +159,10 @@ const styles: Record<string, React.CSSProperties> = {
   sizeText: {
     fontSize: '11px',
     color: '#747775',
+  },
+  errorText: {
+    marginTop: 3,
+    color: '#A12622',
+    fontSize: 11,
   },
 };

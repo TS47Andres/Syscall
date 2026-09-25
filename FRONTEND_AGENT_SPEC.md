@@ -8,7 +8,7 @@ Syscall is a phone-addressed, local-only mail application. An Indian mobile numb
 
 The API is a JSON HTTP service, normally at `http://localhost:3000` for local development. All application routes are rooted at `/`; the API does not use a global `/api/v1` prefix. JSON request bodies must use `Content-Type: application/json`. Phone numbers should be sent in Indian E.164 format (`+91` followed by ten digits), except that the auth services normalize several input formats internally.
 
-The backend currently has no frontend UI, OpenAPI/Swagger document, refresh-token endpoint, account-profile update endpoint, account-deletion endpoint, server-side search, pagination parameters, or public account-registration endpoint. New account creation is currently initiated through the voice assistant; OTP verification is for an account that already exists.
+The backend does not provide OpenAPI/Swagger, a refresh-token endpoint, account deletion, server-side search, or pagination parameters. Browser signup is available through the rate-limited request-call flow; the voice agent confirms the supplied name and obtains explicit account-creation consent before the API creates the account. OTP verification remains for existing accounts.
 
 ### Service and URL boundaries
 
@@ -133,7 +133,7 @@ Verify an OTP for an existing account, consume it, and create a session. This en
 Request:
 
 ```json
-{ "phone": "+919876543210", "otp": "123456" }
+{ "phone": "+919876543210", "otp": "<six-digit OTP received by SMS>" }
 ```
 
 `otp` must be exactly six decimal digits.
@@ -210,7 +210,7 @@ Response `200`:
 
 #### `POST /api/auth/forgot-password`
 
-Request password reset SMS. The response is generic whether or not the account exists, to reduce account enumeration. If an account exists, the backend creates a one-time reset token and queues an SMS. The SMS link points to `PUBLIC_WEBHOOK_BASE_URL/reset-password?token=...` (or localhost fallback); this repository does not include the reset web page.
+Legacy token-based password reset request. The response is generic whether or not the account exists, to reduce account enumeration. If an account exists, the backend creates a one-time reset token and queues an SMS linking to `PUBLIC_WEBHOOK_BASE_URL/reset-password?token=...` (or localhost fallback). The browser frontend's supported recovery flow is OTP request/verification followed by authenticated `POST /api/auth/password/set`; the legacy SMS link is not guaranteed to be publicly reachable through the current Funnel configuration.
 
 Request:
 
@@ -224,7 +224,7 @@ Response `202`:
 { "status": "accepted" }
 ```
 
-The reset token expires after `PASSWORD_RESET_EXPIRY_HOURS` (default 2 hours). The frontend reset page must read the token from the URL and submit it to the next endpoint; never log or send it to analytics.
+The reset token expires after `PASSWORD_RESET_EXPIRY_HOURS` (default 2 hours). If implementing this legacy route, read the token from the URL and submit it only to the reset endpoint; never log or send it to analytics.
 
 #### `POST /api/auth/reset-password`
 
@@ -246,6 +246,24 @@ Invalid/expired token returns `400`. Password policy errors return `400`. The us
 
 ### Outbound voice assistant
 
+#### `POST /api/onboarding/call-request`
+
+Starts the browser-based account-creation request-call flow. Collect the ten-digit Indian phone number and the name the caller wants on the account, then submit only after they explicitly request the call. The API rejects an existing active account (`409`), applies a 60-second per-number cooldown and a maximum of three requests per number per day (`429`), and returns `503` if voice setup is unavailable. It creates a short-lived call ticket and asks Telnyx to call; it does not create an account at this point.
+
+Request:
+
+```json
+{ "phone": "9876543210", "name": "Asha Rao" }
+```
+
+Response `202`:
+
+```json
+{ "status": "started", "callControlId": "<Telnyx call-control ID>" }
+```
+
+During this setup call, the agent first asks the caller to confirm or correct the supplied name, then separately asks for account-creation confirmation. The backend creates the account with the confirmed display name and sends the account SMS only after both confirmations. A denied request or interrupted call does not create an account.
+
 #### `POST /calls/start`
 
 Starts an outbound Telnyx call to the requested Indian number. This can incur telephony charges and should be presented to the user as an explicit call action, not triggered automatically during page load. It requires voice configuration and `PUBLIC_WEBHOOK_BASE_URL` with HTTPS.
@@ -262,9 +280,9 @@ Response `200`:
 { "status": "started", "callControlId": "<Telnyx call-control ID>" }
 ```
 
-This confirms Telnyx accepted the call request; it does not confirm that the person answered, the media stream connected, or the conversation completed. There is no public call-status endpoint or call-history endpoint currently. Missing voice-agent token or public HTTPS URL returns `503`; invalid phone returns `400`. Telnyx credentials are also required for the provider request to succeed. This endpoint currently has no session authentication or call-rate limit in its route handler, so the frontend must only expose it as an explicit, protected product action; frontend checks alone are not an adequate abuse-control mechanism for a public deployment.
+This confirms Telnyx accepted the call request; it does not confirm that the person answered, the media stream connected, or the conversation completed. There is no public call-status endpoint or call-history endpoint currently. Missing voice-agent token or public HTTPS URL returns `503`; invalid phone returns `400`. Telnyx credentials are also required for the provider request to succeed. This legacy general-call endpoint has no session authentication or call-rate limit. Browser signup must use `/api/onboarding/call-request`; do not expose `/calls/start` as a general browser control in the current frontend.
 
-During the live call, the assistant carries on a natural conversation and can invoke account creation or request a password-reset SMS when the caller asks. It can also compose plain-text email for an existing active Syscall recipient. The caller supplies only the recipient's ten-digit phone number; the API appends `LOCAL_MAIL_DOMAIN` and verifies the account. The agent collects or revises the recipient, subject, and body across turns, reads back the resulting address and a concise summary, and asks for confirmation. On the following caller turn, the voice-agent exposes the send action only for that staged email; Sarvam interprets whether the response is an unambiguous affirmative in context and in the caller's language, without a hardcoded phrase list. Attachments are not supported by the voice flow. A clear account-creation request directly invokes the creation action without a separate confirmation turn. There is no IVR/keypad menu or DTMF-triggered action. After completing a request, it asks whether the caller needs any other help in the current language; if the caller's contextual response is a clear decline, Sarvam decides whether to invoke `end_call` without a fixed phrase allowlist. The app speaks a localized goodbye, waits for Telnyx playback completion when available, then issues the hang-up command. The opening prompt is English/Hindi and asks the caller to speak their preferred language. Supported Sarvam voice locales are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia; response language and TTS voice are selected per caller turn, so the caller may switch languages during a call.
+During a general live call, the assistant carries on a natural conversation and can request a password-reset SMS when the caller asks. Account creation is unavailable on general calls; it is restricted to the browser-requested onboarding call and requires name confirmation followed by a separate explicit creation confirmation. The agent can also compose plain-text email for an existing active Syscall recipient. The caller supplies only the recipient's ten-digit phone number; the API appends `LOCAL_MAIL_DOMAIN` and verifies the account. The agent collects or revises the recipient, subject, and body across turns, reads back the resulting address and a concise summary, and asks for confirmation. On the following caller turn, the voice-agent exposes the send action only for that staged email; Sarvam interprets whether the response is affirmative in context and in the caller's language, without a hardcoded phrase list. Attachments are not supported by the voice flow. There is no IVR/keypad menu or DTMF-triggered action. After completing a request, it asks whether the caller needs any other help in the current language; if the caller's contextual response is a clear decline, Sarvam decides whether to invoke `end_call` without a fixed phrase allowlist. The app speaks a localized goodbye, waits for Telnyx playback completion when available, then issues the hang-up command. The opening prompt is English/Hindi and asks the caller to speak their preferred language. Supported Sarvam voice locales are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia; response language and TTS voice are selected per caller turn, so the caller may switch languages during a call.
 
 ## 5. Mail endpoints
 
@@ -274,7 +292,7 @@ All mail routes require `X-Session-Token`. Mail sending also requires `user.pass
 
 Queue a new message to an existing active Syscall recipient. `to` must be a valid local address. The backend derives `from` from the authenticated user; the frontend must not send or allow editing a sender address.
 
-Request for account or call-control actions:
+Request:
 
 ```json
 {
@@ -331,19 +349,19 @@ Scheduled messages are visible only to the sender until the worker starts delive
 
 ### `GET /api/mail`
 
-Returns up to the latest 100 messages where the caller is sender or recipient, sorted by creation time descending. There are no query filters, folder parameters, search, cursor, or pagination metadata. Deleted-for-this-user messages are omitted. Scheduled and cancelled records are hidden from the recipient until delivery begins, but remain visible to the sender. A message may appear in either inbox or sent views; use `senderAddress`/`recipientAddress` and current user's `emailAddress` to classify it.
+Returns up to the latest 100 non-trashed messages where the caller is sender or recipient, sorted by creation time descending. There are no query filters, folder parameters, search, cursor, or pagination metadata. Messages in `scheduled` or `cancelled` state are hidden from this endpoint; pending schedules are listed separately at `GET /api/mail/scheduled`. A message may appear in either inbox or sent views; use `senderAddress`/`recipientAddress` and current user's `emailAddress` to classify it.
 
 Response `200`: JSON array of message records, each with the fields described under “Message record.” No `readAt` side effect occurs from listing.
 
 ### `GET /api/mail/:publicId`
 
-Returns one message only if the caller is an authorized participant and has not deleted their copy. If the caller is the recipient and `readAt` is null, this GET marks it read and audits the read. Opening a message is therefore a state-changing read operation. Sender-only views do not mark it read.
+Returns one message only if the caller is an authorized participant and has not moved their copy to trash. If the caller is the recipient and `readAt` is null, this GET marks it read and audits the read. Opening a message is therefore a state-changing read operation. Sender-only views do not mark it read. Scheduled and cancelled records are hidden from non-senders.
 
-Response `200`: one “Message record.” `_id` and `__v` are removed from this detail response. Missing, unauthorized, or deleted-for-caller messages return `404`.
+Response `200`: one user-safe “Message record.” Mongo `_id` and `__v` are not included. Missing, unauthorized, or trashed-for-caller messages return `404`.
 
 ### `DELETE /api/mail/:publicId`
 
-Soft-deletes the current user's view. Sender and recipient deletion timestamps are maintained separately. The message and stored files are permanently purged only after both participants have deleted it.
+Moves only the current user's copy to recoverable trash. The sender and recipient maintain independent trash state. The message and files are purged only after both participants separately permanently delete their copies.
 
 Response `200`:
 
@@ -351,7 +369,11 @@ Response `200`:
 { "status": "deleted" }
 ```
 
-Unknown or non-participant message returns `404`. Treat the endpoint as irreversible from the caller's perspective; there is no undelete route.
+Unknown or non-participant message returns `404`. Restore with `POST /api/mail/:publicId/restore`. Permanent deletion is separate and must follow moving the message to trash.
+
+### Trash, restore, permanent delete, and stars
+
+`GET /api/mail/trash` returns up to 100 messages in this participant's recoverable trash. `POST /api/mail/:publicId/restore` restores only this participant's copy and returns `{ "status": "restored" }`. `DELETE /api/mail/:publicId/permanent` permanently deletes this participant's copy and returns `{ "status": "permanently-deleted" }`; it returns `409` unless that copy is already in trash. `DELETE /api/mail/trash` permanently deletes all this participant's trashed copies and returns `{ "status": "emptied", "count": number }`. The shared record and files are purged only after both sender and recipient permanently delete their respective copies. Star/unstar uses `PUT` and `DELETE /api/mail/:publicId/star`, returning `{ "isStarred": true|false }`; the flag is participant-specific.
 
 ### `POST /api/mail/:publicId/spam`
 
@@ -377,37 +399,27 @@ Both spam operations return `404` for an unknown message or a message where call
 
 ### Message record
 
-Mail list/detail JSON is derived from the persistence model. The current record fields are:
+Mail list/detail JSON is a user-safe DTO. It contains only these fields:
 
 | Field | Type / meaning |
 |---|---|
 | `publicId` | Public message identifier; use this in routes and React keys. |
-| `senderUserId`, `recipientUserId` | Persistence-layer user identifiers; present in returned model objects but not stable public identifiers. Do not use for navigation or authorization. |
 | `senderAddress`, `recipientAddress` | Local Syscall addresses. |
 | `subject` | String, at most 998 characters at send. |
 | `textBody` | Plain-text body, string. |
 | `htmlBody` | HTML string or null. Render as untrusted content; sanitize or sandbox it. |
-| `attachments` | Array of attachment metadata. |
+| `attachments` | Array of `{ filename, contentType, sizeBytes }`; retrieve bytes through the authenticated attachment route. |
 | `deliveryStatus` | `scheduled`, `queued`, `delivered`, `failed`, or `cancelled`. |
 | `scheduledAt` | UTC ISO date string or null; planned delivery instant, retained for history after delivery/cancellation. |
-| `scheduleVersion` | Internal concurrency generation used to invalidate stale delayed jobs; do not expose as a control. |
 | `isSpam` | Boolean. |
+| `isStarred`, `isTrashed` | Booleans scoped to the current participant. |
 | `readAt` | ISO date string or null; recipient read timestamp. |
-| `senderDeletedAt`, `recipientDeletedAt` | ISO date string or null; per-party soft deletion. |
 | `createdAt`, `updatedAt` | ISO date strings. |
 | `deliveredAt`, `failedAt` | ISO date string or null. |
-| `lastDeliveryError` | String or null; avoid surfacing raw provider/internal detail directly. |
-| `inReplyTo` | Message-ID string or null; usually null for frontend-originated sends. |
-| `references` | String array; usually empty for frontend-originated sends. |
-| `messageIdHeader` | SMTP Message-ID value. |
-| `rawMimePath` | Internal filesystem path for the stored raw message; detail serialization currently includes this implementation field. Never render or expose it. |
-| `__v` | Mongoose version field may be included. Ignore it. |
-| `attachments[].originalFilename` | Display name supplied by sender. Never use as a path. |
-| `attachments[].contentType` | Declared MIME type. |
-| `attachments[].size` | Bytes. |
-| `attachments[].storageKey` | Internal generated storage key; not a download URL. Do not expose as a link. |
+| `inReplyTo` | Message-ID string or null; used for email threading. |
+| `references` | String array; RFC thread references. |
 
-The mail list overwrites `_id` with `undefined` (so JSON serialization omits it), while detail removes `_id` and `__v`; both responses can still expose persistence identifiers and internal fields noted above. These are implementation leaks, not frontend contract fields. Frontend should rely only on `publicId` and user-safe fields. There is currently no attachment download endpoint.
+Mailbox and draft responses are now serialized as user-safe DTOs using `publicId`; Mongo IDs, raw MIME paths, attachment storage keys, and per-user deletion timestamps are not returned. Attachment bytes are available only through the authenticated message/draft attachment routes described below.
 
 ## 6. Draft endpoints
 
@@ -437,7 +449,7 @@ Response `200`:
 
 ### `GET /api/drafts`
 
-Returns all drafts owned by the caller, sorted by `updatedAt` descending. There is no pagination. Current query does not filter by status, though only `draft` records can be edited/deleted/sent.
+Returns all editable drafts owned by the caller, sorted by `updatedAt` descending. There is no pagination. Each record contains public ID, recipient, subject, text, sanitized attachment metadata, and timestamps.
 
 Response `200`: JSON array of draft records.
 
@@ -445,11 +457,11 @@ Response `200`: JSON array of draft records.
 
 Returns an owned draft or `404`.
 
-Response `200`: draft persistence record including `publicId`, `recipientAddress`, `subject`, `textBody`, `htmlBody`, `attachments`, `status`, `createdAt`, and `updatedAt`. Lean results may also include persistence identifiers such as `_id`, `ownerUserId`, and `__v`; treat those as implementation details and rely on `publicId`.
+Response `200`: user-safe object with `publicId`, `recipientAddress`, `subject`, `textBody`, sanitized `attachments`, `createdAt`, and `updatedAt`. Database identifiers and storage paths are not returned.
 
 ### `PATCH /api/drafts/:publicId`
 
-Updates only supplied fields among `to`, `subject`, `textBody`, and `htmlBody`. `to` can be set to null. This route does not update attachments. Only a record with status `draft` can be updated; otherwise it returns `404`.
+Updates supplied fields among `to`, `subject`, `textBody`, `htmlBody`, and `attachments`. `to` can be set to null. Supplying `attachments` replaces the complete attachment set; omitted attachments are retained. Only a record with status `draft` can be updated; otherwise it returns `404`.
 
 Request example:
 
@@ -471,7 +483,7 @@ Response `200`:
 
 ### `POST /api/drafts/:publicId/send`
 
-Queues an owned draft for sending. No request body is required. It must have a recipient; a missing recipient returns `400`. Unlike `/api/mail/send`, the current draft-send handler does not check `passwordConfigured`; do not rely on it to enforce password setup until the backend is aligned. The draft status becomes `queued` and the email is created. A recipient that is not an existing active user currently fails as a generic service error (`500`).
+Queues an owned draft for sending. No request body is required. It must have a recipient; a missing recipient returns `400`. The handler requires `passwordConfigured === true`, and the recipient must be an existing active local-domain account. The draft status becomes `queued` and the email is created.
 
 Response `202`:
 
@@ -512,7 +524,7 @@ Request:
 { "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "create_account" }
 ```
 
-`action` may be `create_account`, `request_password_reset`, `end_call`, `prepare_email`, `prepare_scheduled_email`, `send_email`, `schedule_email`, `discard_email`, `list_scheduled_emails`, `cancel_scheduled_email`, or `reschedule_scheduled_email`; `actionId` is 12–80 characters. Account creation resolves the phone from the active call, is idempotent by call/action ID, creates an account only if absent, and queues a confirmation SMS for a newly created account. Reset action queues generic reset instructions. `end_call` sends Telnyx's Call Control hang-up command; the voice agent exposes it to the conversational model only after asking whether more help is needed, and the model decides from the caller's natural-language answer whether it is a clear no (no fixed phrase allowlist). This is not an alternative public registration/reset endpoint. Inactive calls return `401`; an in-progress duplicate action may return `409`.
+`action` may include `confirm_account_name`, `authorize_account_create`, `create_account`, `request_password_reset`, `end_call`, `prepare_email`, `prepare_scheduled_email`, `send_email`, `schedule_email`, `discard_email`, `list_scheduled_emails`, `cancel_scheduled_email`, or `reschedule_scheduled_email`; `actionId` is 12–80 characters. Name confirmation is allowed only for an onboarding call in `confirm_name`; authorization is recorded only after the voice agent speaks its account-creation question; `create_account` is allowed only in the resulting `confirm_create` state. Creation resolves phone from the active call and persists the confirmed display name; newly created accounts receive a confirmation SMS. Reset queues generic instructions. `end_call` sends Telnyx's Call Control hang-up command; the voice agent exposes it only after asking whether more help is needed, and the model decides from the caller's natural-language answer whether it is a clear no. Inactive calls return `401`; an in-progress duplicate action may return `409`.
 
 Email action examples:
 
@@ -547,7 +559,10 @@ Request: `{ "callControlId": "<id>" }`. Deletes API-side authorization and any p
 
 ### New account
 
-There is no public account-creation endpoint. Current supported path: the user initiates/answers a voice call and asks the conversational assistant to create an account; a clear request invokes the internal action directly without keypad input or a second confirmation. Upon success, the backend creates the user's `@niti` identity and queues an SMS. The frontend can then use OTP request/verify or password login to authenticate. Do not fabricate a registration endpoint or create an account by calling `/internal/voice/actions`.
+1. Collect the caller's ten-digit phone number and display name.
+2. Call `POST /api/onboarding/call-request` with `{ "phone": "9876543210", "name": "Asha Patel" }`. The response is `202 { "status": "started", "callControlId": "..." }`; this means Telnyx accepted the call request, not that the call was answered.
+3. The caller answers the call. The voice assistant reads back the name and waits for confirmation. If corrected, it reads back the corrected name and confirms it. It then asks whether to create the account; only a clear affirmative to that separate question enables the account tool.
+4. Upon successful creation, the backend creates the configured local address and queues an SMS. The frontend does not poll a call-status endpoint. Do not create a user directly or call `/internal/voice/actions` from browser code.
 
 ### Existing account first sign-in
 
@@ -558,22 +573,22 @@ There is no public account-creation endpoint. Current supported path: the user i
 
 ### Returning user
 
-Call `POST /api/auth/password/login`, then attach the returned token. On `401`, clear session state. If forgotten password, call `/api/auth/forgot-password`, serve a frontend reset page that submits `/api/auth/reset-password`, then require login again.
+On app startup, if a tab-scoped session token exists, call `GET /api/auth/me`; do not trust cached account data as proof of identity. On `401`, clear session state and return to sign-in. Password sign-in uses `POST /api/auth/password/login`. Forgot-password requests an OTP, verifies it for the existing account, then sets a new password through the authenticated `/api/auth/password/set` route. The legacy token flow remains available through `/api/auth/forgot-password`, `/reset-password?token=...`, and `/api/auth/reset-password`.
 
 ### Compose/send
 
-Use `/api/drafts` for create/autosave, then `/api/drafts/:publicId/send` or directly `/api/mail/send`. Show the `202` result as queued, not delivered. Polling is not available as a dedicated endpoint; refresh `GET /api/mail` to observe a later delivery status.
+Use `/api/drafts` for create/update/delete and `/api/drafts/:publicId/send` for draft delivery, or directly `/api/mail/send`. Send requests accept validated base64 attachments. For delayed delivery, use `/api/mail/scheduled` with `scheduledAt` as RFC3339 including an offset; list with `GET`, reschedule with `PATCH`, cancel with `DELETE`. Show accepted sends as queued, not delivered. There is no push or delivery-status polling endpoint; refresh `GET /api/mail` to observe later status.
 
 ### Mailbox
 
-Fetch `GET /api/mail`; the backend returns at most 100 latest records. Open by `publicId`; opening as recipient marks the message read. Use `DELETE /api/mail/:publicId` for per-user soft delete, and the spam routes only for recipient-owned messages. Since there is no pagination/search/download API, do not build UI controls that imply those server capabilities.
+Fetch `GET /api/mail`; the backend returns at most 100 latest records. Open with `GET /api/mail/:publicId`; opening as recipient marks it read. Star/unstar with `PUT`/`DELETE /api/mail/:publicId/star`. Move a copy to trash with `DELETE /api/mail/:publicId`, list trash with `GET /api/mail/trash`, restore with `POST /api/mail/:publicId/restore`, permanently delete with `DELETE /api/mail/:publicId/permanent`, or empty trash with `DELETE /api/mail/trash`. Physical record/files are purged only after both participants permanently delete their copies. Spam routes are recipient-only. Thread replies use `POST /api/mail/:publicId/reply`; the backend derives recipient and subject and writes `In-Reply-To`/`References` headers. Attachment metadata omits storage paths; download through `GET /api/mail/:publicId/attachments/:index` or the corresponding draft path. Profile data is available at `GET /api/profile`; update name/avatar with `PATCH /api/profile`.
 
 ## 9. Frontend security and accessibility requirements
 
 - Never put OTPs, passwords, reset tokens, session tokens, voice tickets, or service credentials in URLs, logs, telemetry, or client error reports.
 - Do not call `/internal/voice/*` or Telnyx webhooks from browser code.
 - Never trust `htmlBody`; sanitize it and render in an appropriately sandboxed context. Do not load remote content automatically without a deliberate privacy decision.
-- Never treat `storageKey` as a download URL or filesystem path. No attachment download endpoint exists.
+- Never treat `storageKey` as a download URL or filesystem path. Use the authenticated attachment routes and public metadata only.
 - Use `publicId`, not Mongo `_id`, as the stable frontend identifier.
 - Handle `401` globally by clearing session state and returning to sign-in; handle `403` as authenticated-but-not-allowed (commonly password not configured); handle `404` without revealing other users' message existence.
 - Treat `202` as accepted/queued and display asynchronous status honestly.
@@ -581,18 +596,16 @@ Fetch `GET /api/mail`; the backend returns at most 100 latest records. Open by `
 - Keep account-enumeration-safe UI copy for forgot-password and reset flows.
 - Support keyboard navigation, visible focus states, mobile layouts, accessible labels, and clear loading/error/empty states; the API itself does not supply presentation or localized copy.
 
-## 10. Contract gaps to coordinate with backend before production frontend launch
+## 10. Remaining contract gaps to coordinate before production launch
 
 1. Configure explicit CORS allowlisted origins or put the frontend and API behind a same-origin reverse proxy.
 2. Map expected domain errors to appropriate HTTP statuses and stable machine-readable `errorCode` values; currently many become `500`.
 3. Add API request/response schemas (OpenAPI or equivalent) to prevent drift.
 4. Decide and document a secure browser session strategy; current token is JavaScript-readable and there is no refresh flow.
-5. Provide a public account-creation path if voice-only registration is not acceptable.
-6. Add attachment download/read capability and resolve practical request-body size limits for base64 uploads.
-7. Add pagination/search/filtering for mail and drafts if mailbox scale requires it.
-8. Add a public call status/history mechanism only if the UI needs post-initiation state; `/calls/start` alone only reports request acceptance.
-9. Implement and host the user-facing reset page referenced by reset SMS links.
-10. Align the password-setup guard between direct mail send and draft send.
+5. Add pagination/search/filtering for mail and drafts if mailbox scale requires it.
+6. Add public call status/history only if the UI needs post-initiation progress; signup currently reports request acceptance only.
+7. Resolve practical request-body limits for large base64 attachments.
+8. Add delivery-status push/polling only if the UI needs it beyond manual refresh.
 
 ## 11. Endpoint inventory checklist
 
@@ -608,7 +621,9 @@ Fetch `GET /api/mail`; the backend returns at most 100 latest records. Open by `
 | `POST` | `/api/auth/logout-all` | Frontend, authenticated |
 | `POST` | `/api/auth/forgot-password` | Frontend |
 | `POST` | `/api/auth/reset-password` | Frontend |
-| `POST` | `/calls/start` | Frontend, explicit call action |
+| `GET` | `/api/auth/me` | Frontend, authenticated |
+| `POST` | `/api/onboarding/call-request` | Frontend, rate-limited signup |
+| `POST` | `/calls/start` | Legacy general-call route; not used by browser frontend |
 | `POST` | `/api/mail/send` | Frontend, authenticated |
 | `POST` | `/api/mail/scheduled` | Frontend, authenticated |
 | `GET` | `/api/mail/scheduled` | Frontend, authenticated |
@@ -617,6 +632,14 @@ Fetch `GET /api/mail`; the backend returns at most 100 latest records. Open by `
 | `GET` | `/api/mail` | Frontend, authenticated |
 | `GET` | `/api/mail/:publicId` | Frontend, authenticated |
 | `DELETE` | `/api/mail/:publicId` | Frontend, authenticated |
+| `GET` | `/api/mail/trash` | Frontend, authenticated |
+| `DELETE` | `/api/mail/trash` | Frontend, authenticated |
+| `POST` | `/api/mail/:publicId/restore` | Frontend, authenticated |
+| `DELETE` | `/api/mail/:publicId/permanent` | Frontend, authenticated |
+| `PUT` | `/api/mail/:publicId/star` | Frontend, authenticated participant |
+| `DELETE` | `/api/mail/:publicId/star` | Frontend, authenticated participant |
+| `POST` | `/api/mail/:publicId/reply` | Frontend, authenticated participant |
+| `GET` | `/api/mail/:publicId/attachments/:index` | Frontend, authenticated participant |
 | `POST` | `/api/mail/:publicId/spam` | Frontend, authenticated recipient |
 | `DELETE` | `/api/mail/:publicId/spam` | Frontend, authenticated recipient |
 | `POST` | `/api/drafts` | Frontend, authenticated |
@@ -625,6 +648,9 @@ Fetch `GET /api/mail`; the backend returns at most 100 latest records. Open by `
 | `PATCH` | `/api/drafts/:publicId` | Frontend, authenticated |
 | `DELETE` | `/api/drafts/:publicId` | Frontend, authenticated |
 | `POST` | `/api/drafts/:publicId/send` | Frontend, authenticated |
+| `GET` | `/api/drafts/:publicId/attachments/:index` | Frontend, authenticated owner |
+| `GET` | `/api/profile` | Frontend, authenticated |
+| `PATCH` | `/api/profile` | Frontend, authenticated |
 | `POST` | `/webhooks/telnyx/voice` | Telnyx only |
 | `POST` | `/webhooks/telnyx/sms` | Telnyx only |
 | `POST` | `/internal/voice/sessions/activate` | Voice-agent only |

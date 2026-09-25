@@ -1,0 +1,41 @@
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useMail } from '../context/MailContext';
+import { DedicatedProfilePage } from '../components/profile/DedicatedProfilePage';
+
+export const ProfilePage: React.FC = () => {
+  const navigate = useNavigate();
+  const {
+    currentUser,
+    handleUpdateName,
+    handleUpdatePhoto,
+    handleSignOut,
+  } = useMail();
+
+  const handleBackToMail = () => {
+    navigate('/mail/inbox');
+  };
+
+  return (
+    <main style={styles.profileContainer}>
+      <DedicatedProfilePage
+        currentUser={currentUser}
+        onUpdateName={handleUpdateName}
+        onUpdatePhoto={handleUpdatePhoto}
+        onSignOut={handleSignOut}
+        onBackToMail={handleBackToMail}
+      />
+    </main>
+  );
+};
+
+const styles: Record<string, React.CSSProperties> = {
+  profileContainer: {
+    flex: 1,
+    display: 'flex',
+    overflow: 'hidden',
+    position: 'relative',
+    height: '100%',
+    minWidth: 0,
+  },
+};

@@ -14,11 +14,17 @@ export const QUEUE_NAMES = {
 
 export interface OutboundEmailJob {
   emailId: string;
+  scheduleVersion?: number;
   failureNotification?: {
     phoneE164: string;
     recipientPhone10: string;
     dedupeKey: string;
   };
+}
+
+// Produces a stable job ID for one version of a scheduled email.
+export function scheduledEmailJobId(emailId: string, scheduleVersion: number): string {
+  return `scheduled-${emailId}-${scheduleVersion}`;
 }
 
 export interface UnreadEmailSmsJob {
@@ -41,6 +47,18 @@ export function createOutboundEmailQueue(connection: Redis): Queue<OutboundEmail
   return new Queue<OutboundEmailJob>(QUEUE_NAMES.outboundEmail, { connection });
 }
 
+// Adds a durable delayed delivery job for one schedule version.
+export async function enqueueScheduledEmail(queue: Queue<OutboundEmailJob>, input: { emailId: string; scheduleVersion: number; scheduledAt: Date }): Promise<void> {
+  await queue.add('scheduled-email', { emailId: input.emailId, scheduleVersion: input.scheduleVersion }, {
+    jobId: scheduledEmailJobId(input.emailId, input.scheduleVersion),
+    delay: Math.max(0, input.scheduledAt.getTime() - Date.now()),
+    attempts: 3,
+    backoff: { type: 'custom' },
+    removeOnComplete: 1000,
+    removeOnFail: 5000,
+  });
+}
+
 // Creates the delayed unread email SMS queue.
 export function createUnreadEmailSmsQueue(connection: Redis): Queue<UnreadEmailSmsJob> {
   return new Queue<UnreadEmailSmsJob>(QUEUE_NAMES.unreadEmailSms, { connection });
@@ -57,5 +75,5 @@ export async function queueEmailFailureSms(queue: Queue<SmsSendJob>, input: { ph
     phoneE164: input.phoneE164,
     body: `Your message to ${input.recipientPhone10} failed due to a technical error.`,
     auditEmailId: input.auditEmailId,
-  }, { jobId: `email-failure-${input.dedupeKey}` });
+  }, { jobId: `email-failure-${input.dedupeKey.replace(/[^A-Za-z0-9_-]/g, '-')}` });
 }

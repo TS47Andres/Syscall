@@ -6,29 +6,68 @@
 import fs from 'node:fs/promises';
 import nodemailer from 'nodemailer';
 import { Worker, type Job } from 'bullmq';
-import { Email, User, AuditLog, connectDatabase, disconnectDatabase } from '@syscall/db';
+import { Email, User, AuditLog, connectDatabase, disconnectDatabase, type EmailDocument } from '@syscall/db';
 import { loadConfig } from '@syscall/config';
 import { createLogger } from '@syscall/logging';
-import { createRedisConnection, QUEUE_NAMES, createSmsQueue, queueEmailFailureSms, type OutboundEmailJob, type SmsSendJob, type UnreadEmailSmsJob } from '@syscall/queues';
+import { createOutboundEmailQueue, createRedisConnection, QUEUE_NAMES, createSmsQueue, enqueueScheduledEmail, queueEmailFailureSms, scheduledEmailJobId, type OutboundEmailJob, type SmsSendJob, type UnreadEmailSmsJob } from '@syscall/queues';
 import { sendSms } from '@syscall/telnyx';
 
 // Starts all asynchronous workers after configuration and infrastructure validation.
 async function start(): Promise<void> {
   const config = loadConfig(); const logger = createLogger('worker'); await connectDatabase(config.MONGODB_URI); const redis = createRedisConnection(config.REDIS_URL); await redis.ping();
   const smtpTransport = nodemailer.createTransport({ host: config.SMTP_HOST, port: config.SMTP_PORT, secure: false, ignoreTLS: true });
+  const outboundQueue = createOutboundEmailQueue(redis);
   const smsQueue = createSmsQueue(redis);
   const outboundWorker = new Worker<OutboundEmailJob>(QUEUE_NAMES.outboundEmail, async (job) => deliverEmail(job, smtpTransport, config, smsQueue, logger), { connection: redis, settings: { backoffStrategy: (attemptsMade) => [10000, 30000, 60000][attemptsMade] ?? 60000 } });
   const unreadWorker = new Worker<UnreadEmailSmsJob>(QUEUE_NAMES.unreadEmailSms, async (job) => notifyUnreadEmail(job, redis), { connection: redis });
   const smsWorker = new Worker<SmsSendJob>(QUEUE_NAMES.smsSend, async (job) => deliverSms(job, config, logger), { connection: redis });
+  let recoveringSchedules = false;
+  const recoverSchedules = async (): Promise<void> => {
+    if (recoveringSchedules) return;
+    recoveringSchedules = true;
+    try { await reconcileScheduledEmailJobs(outboundQueue, logger); }
+    finally { recoveringSchedules = false; }
+  };
+  await recoverSchedules();
+  const scheduleRecoveryTimer = setInterval(() => void recoverSchedules().catch((error) => logger.error({ err: error }, 'Scheduled email recovery pass failed')), 30000);
+  scheduleRecoveryTimer.unref();
   for (const worker of [outboundWorker, unreadWorker, smsWorker]) worker.on('failed', (job, error) => logger.error({ queue: worker.name, jobId: job?.id, err: error }, 'Background job failed'));
-  const shutdown = async (signal: string): Promise<void> => { logger.info({ signal }, 'Shutting down worker'); await Promise.all([outboundWorker.close(), unreadWorker.close(), smsWorker.close()]); await redis.quit(); await disconnectDatabase(); process.exit(0); };
+  const shutdown = async (signal: string): Promise<void> => { logger.info({ signal }, 'Shutting down worker'); clearInterval(scheduleRecoveryTimer); await Promise.all([outboundWorker.close(), unreadWorker.close(), smsWorker.close(), outboundQueue.close()]); await redis.quit(); await disconnectDatabase(); process.exit(0); };
   process.once('SIGINT', () => void shutdown('SIGINT')); process.once('SIGTERM', () => void shutdown('SIGTERM'));
   logger.info('Syscall workers listening');
 }
 
+// Recreates missing or exhausted delayed jobs from scheduled MongoDB records.
+async function reconcileScheduledEmailJobs(queue: ReturnType<typeof createOutboundEmailQueue>, logger: ReturnType<typeof createLogger>): Promise<void> {
+  const cursor = Email.find({ deliveryStatus: 'scheduled' }).select({ publicId: 1, scheduleVersion: 1, scheduledAt: 1 }).lean().cursor();
+  for await (const email of cursor) {
+    if (!email.scheduledAt) continue;
+    const jobId = scheduledEmailJobId(email.publicId, email.scheduleVersion);
+    const job = await queue.getJob(jobId);
+    if (job) {
+      const state = await job.getState();
+      if (state !== 'failed' && state !== 'completed') continue;
+      await job.remove();
+    }
+    await enqueueScheduledEmail(queue, { emailId: email.publicId, scheduleVersion: email.scheduleVersion, scheduledAt: email.scheduledAt });
+  }
+}
+
 // Delivers a queued email through the internal SMTP service and records final state.
 async function deliverEmail(job: Job<OutboundEmailJob>, transport: nodemailer.Transporter, config: ReturnType<typeof loadConfig>, smsQueue: ReturnType<typeof createSmsQueue>, logger: ReturnType<typeof createLogger>): Promise<void> {
-  const email = await Email.findOne({ publicId: job.data.emailId }); if (!email) throw new Error('Queued email no longer exists.');
+  let email = await Email.findOne({ publicId: job.data.emailId }); if (!email) throw new Error('Queued email no longer exists.');
+  if (job.data.scheduleVersion !== undefined) {
+    if (email.scheduleVersion !== job.data.scheduleVersion) return;
+    if (email.deliveryStatus === 'scheduled') {
+      const transitionedEmail = await Email.findOneAndUpdate(
+        { _id: email._id, deliveryStatus: 'scheduled', scheduleVersion: job.data.scheduleVersion, scheduledAt: { $lte: new Date() } },
+        { $set: { deliveryStatus: 'queued' } },
+        { new: true },
+      );
+      if (!transitionedEmail) return;
+      email = transitionedEmail;
+    } else if (email.deliveryStatus !== 'queued') return;
+  } else if (email.deliveryStatus !== 'queued') return;
   let deliveryResponse: string;
   try {
     const result = await transport.sendMail({ from: email.senderAddress, to: email.recipientAddress, subject: email.subject, text: email.textBody, html: email.htmlBody ?? undefined, messageId: email.messageIdHeader, inReplyTo: email.inReplyTo ?? undefined, references: email.references, attachments: await Promise.all(email.attachments.map(async (attachment) => ({ filename: attachment.originalFilename, content: await fs.readFile(`${config.ATTACHMENT_STORAGE_PATH}/${attachment.storageKey}`) }))) });
@@ -52,9 +91,12 @@ async function deliverEmail(job: Job<OutboundEmailJob>, transport: nodemailer.Tr
         logger.error({ emailId: email.publicId, err: auditError }, 'Could not record failed email audit event');
       }
     }
-    if (finalAttempt && job.data.failureNotification) {
+    const failureNotification = finalAttempt
+      ? job.data.failureNotification ?? (email.scheduledByVoice ? await scheduledVoiceFailureNotification(email) : undefined)
+      : undefined;
+    if (failureNotification) {
       try {
-        await queueEmailFailureSms(smsQueue, { ...job.data.failureNotification, auditEmailId: email.publicId });
+        await queueEmailFailureSms(smsQueue, { ...failureNotification, dedupeKey: `scheduled-${email.publicId}`, auditEmailId: email.publicId });
         logger.info({ emailId: email.publicId }, 'Queued sender SMS after confirmed voice email delivery failure');
       } catch (notificationError) {
         logger.error({ emailId: email.publicId, err: notificationError }, 'Could not queue sender SMS after confirmed voice email delivery failure');
@@ -68,6 +110,14 @@ async function deliverEmail(job: Job<OutboundEmailJob>, transport: nodemailer.Tr
   } catch (auditError) {
     logger.error({ emailId: email.publicId, err: auditError }, 'Could not record delivered email audit event');
   }
+}
+
+// Builds the delayed-delivery failure notice for a voice schedule after retries end.
+async function scheduledVoiceFailureNotification(email: EmailDocument): Promise<{ phoneE164: string; recipientPhone10: string; dedupeKey: string } | undefined> {
+  const sender = await User.findById(email.senderUserId).select({ phoneE164: 1 });
+  const recipientPhone10 = email.recipientAddress.split('@')[0];
+  if (!sender || !/^[6-9]\d{9}$/.test(recipientPhone10 ?? '')) return undefined;
+  return { phoneE164: sender.phoneE164, recipientPhone10: recipientPhone10!, dedupeKey: `scheduled-${email.publicId}` };
 }
 
 // Rechecks unread state after the durable delay and queues a notification only when needed.

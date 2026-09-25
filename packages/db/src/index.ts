@@ -34,7 +34,11 @@ export interface EmailDocument extends Document {
   messageIdHeader: string;
   inReplyTo: string | null;
   references: string[];
-  deliveryStatus: 'queued' | 'delivered' | 'failed';
+  deliveryStatus: 'scheduled' | 'queued' | 'delivered' | 'failed' | 'cancelled';
+  scheduledAt: Date | null;
+  scheduleVersion: number;
+  scheduledByVoice: boolean;
+  scheduleActionId?: string;
   isSpam: boolean;
   readAt: Date | null;
   senderDeletedAt: Date | null;
@@ -123,7 +127,11 @@ const emailSchema = new Schema<EmailDocument>({
   messageIdHeader: { type: String, required: true },
   inReplyTo: { type: String, default: null },
   references: { type: [String], default: [] },
-  deliveryStatus: { type: String, enum: ['queued', 'delivered', 'failed'], default: 'queued', index: true },
+  deliveryStatus: { type: String, enum: ['scheduled', 'queued', 'delivered', 'failed', 'cancelled'], default: 'queued', index: true },
+  scheduledAt: { type: Date, default: null, index: true },
+  scheduleVersion: { type: Number, default: 0 },
+  scheduledByVoice: { type: Boolean, default: false },
+  scheduleActionId: { type: String },
   isSpam: { type: Boolean, default: false, index: true },
   readAt: { type: Date, default: null, index: true },
   senderDeletedAt: { type: Date, default: null },
@@ -134,6 +142,8 @@ const emailSchema = new Schema<EmailDocument>({
 }, { timestamps: true });
 emailSchema.index({ recipientUserId: 1, recipientDeletedAt: 1, createdAt: -1 });
 emailSchema.index({ senderUserId: 1, senderDeletedAt: 1, createdAt: -1 });
+emailSchema.index({ deliveryStatus: 1, scheduledAt: 1 });
+emailSchema.index({ scheduleActionId: 1 }, { unique: true, sparse: true });
 
 const draftSchema = new Schema<DraftDocument>({
   publicId: { type: String, required: true, unique: true, default: uuidv7, index: true },

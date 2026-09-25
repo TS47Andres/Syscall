@@ -298,9 +298,40 @@ Response `202`:
 
 `queued` is asynchronous acceptance, not delivery. The recipient must already exist and be active. A nonexistent recipient currently surfaces as a generic `500` service error.
 
+### `POST /api/mail/scheduled`
+
+Creates a complete message for future delivery; it does not create or require a draft. Requires `X-Session-Token` and `user.passwordConfigured === true`. The recipient must be an existing active Syscall account.
+
+```json
+{
+  "to": "9300640012@niti",
+  "subject": "Happy Birthday",
+  "textBody": "Wishing you a wonderful day!",
+  "scheduledAt": "2026-10-01T09:00:00+05:30"
+}
+```
+
+`scheduledAt` must be RFC3339 with an explicit timezone offset. Send local India times with `+05:30`; MongoDB stores the resulting UTC instant. Optional `htmlBody` and `attachments` use the same formats as `/api/mail/send`. The time must be at least one minute and at most 365 days in the future according to the API clock; invalid/ambiguous timestamps return `400`.
+
+Response `202`: `{ "publicId": "<message public UUID>", "deliveryStatus": "scheduled", "scheduledAt": "<UTC ISO timestamp>" }`. This confirms the schedule was durably recorded, not that the later message will be delivered.
+
+### `GET /api/mail/scheduled`
+
+Lists up to 100 of the caller's pending scheduled messages, ordered by send time. Returns summary fields `publicId`, `recipientAddress`, `subject`, `scheduledAt`, and `createdAt`; it does not expose message bodies.
+
+### `PATCH /api/mail/scheduled/:publicId`
+
+Reschedules a sender-owned pending email by changing only its time. Request: `{ "scheduledAt": "2026-10-01T09:00:00+05:30" }`. Uses the same explicit-offset and 1-minute-to-365-day validation. Returns the updated `publicId`, `deliveryStatus`, and UTC `scheduledAt`. Returns `404` if not owned/found or `409` if delivery has already started or the schedule is no longer pending.
+
+### `DELETE /api/mail/scheduled/:publicId`
+
+Cancels a sender-owned scheduled email while it is still pending. Returns `{ "publicId": "...", "deliveryStatus": "cancelled" }`; returns `404` if not owned/found or `409` if the worker has already started delivery. Cancellation invalidates the delayed job version, so a stale queue job cannot send it.
+
+Scheduled messages are visible only to the sender until the worker starts delivery. The recipient's inbox/list and detail routes hide both `scheduled` and `cancelled` messages. At the due time, the worker transitions the record to `queued` and uses the existing SMTP retry path.
+
 ### `GET /api/mail`
 
-Returns up to the latest 100 messages where the caller is sender or recipient, sorted by creation time descending. There are no query filters, folder parameters, search, cursor, or pagination metadata. Deleted-for-this-user messages are omitted. A message may appear in either inbox or sent views; use `senderAddress`/`recipientAddress` and current user's `emailAddress` to classify it.
+Returns up to the latest 100 messages where the caller is sender or recipient, sorted by creation time descending. There are no query filters, folder parameters, search, cursor, or pagination metadata. Deleted-for-this-user messages are omitted. Scheduled and cancelled records are hidden from the recipient until delivery begins, but remain visible to the sender. A message may appear in either inbox or sent views; use `senderAddress`/`recipientAddress` and current user's `emailAddress` to classify it.
 
 Response `200`: JSON array of message records, each with the fields described under “Message record.” No `readAt` side effect occurs from listing.
 
@@ -357,7 +388,9 @@ Mail list/detail JSON is derived from the persistence model. The current record 
 | `textBody` | Plain-text body, string. |
 | `htmlBody` | HTML string or null. Render as untrusted content; sanitize or sandbox it. |
 | `attachments` | Array of attachment metadata. |
-| `deliveryStatus` | `queued`, `delivered`, or `failed`. |
+| `deliveryStatus` | `scheduled`, `queued`, `delivered`, `failed`, or `cancelled`. |
+| `scheduledAt` | UTC ISO date string or null; planned delivery instant, retained for history after delivery/cancellation. |
+| `scheduleVersion` | Internal concurrency generation used to invalidate stale delayed jobs; do not expose as a control. |
 | `isSpam` | Boolean. |
 | `readAt` | ISO date string or null; recipient read timestamp. |
 | `senderDeletedAt`, `recipientDeletedAt` | ISO date string or null; per-party soft deletion. |
@@ -467,6 +500,10 @@ Every route requires `X-Syscall-Voice-Token`; it is a service-to-service secret 
 
 Request: `{ "ticket": string, "callControlId": string, "phone": "+91..." }`. The one-time ticket must be at least 32 characters; call-control ID at least 10 characters. Consumes and validates ticket, expected phone, and active call. Returns `{ "status": "active" }`; invalid/expired/mismatched call returns `401`.
 
+#### `POST /internal/voice/time-context`
+
+Request: `{ "callControlId": "<active call-control ID>" }`. Returns the API server's current `{ "now": "<UTC ISO timestamp>", "timeZone": "Asia/Kolkata", "localTime": "<localized IST date and time>" }`. Requires both the voice-agent service token and a live call. The agent refreshes this context on each caller turn; relative-delay scheduling is calculated against API time.
+
 #### `POST /internal/voice/actions`
 
 Request:
@@ -475,17 +512,26 @@ Request:
 { "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "create_account" }
 ```
 
-`action` may be `create_account`, `request_password_reset`, `end_call`, `prepare_email`, `send_email`, or `discard_email`; `actionId` is 12–80 characters. Account creation resolves the phone from the active call, is idempotent by call/action ID, creates an account only if absent, and queues a confirmation SMS for a newly created account. Reset action queues generic reset instructions. `end_call` sends Telnyx's Call Control hang-up command; the voice agent exposes it to the conversational model only after asking whether more help is needed, and the model decides from the caller's natural-language answer whether it is a clear no (no fixed phrase allowlist). This is not an alternative public registration/reset endpoint. Inactive calls return `401`; an in-progress duplicate action may return `409`.
+`action` may be `create_account`, `request_password_reset`, `end_call`, `prepare_email`, `prepare_scheduled_email`, `send_email`, `schedule_email`, `discard_email`, `list_scheduled_emails`, `cancel_scheduled_email`, or `reschedule_scheduled_email`; `actionId` is 12–80 characters. Account creation resolves the phone from the active call, is idempotent by call/action ID, creates an account only if absent, and queues a confirmation SMS for a newly created account. Reset action queues generic reset instructions. `end_call` sends Telnyx's Call Control hang-up command; the voice agent exposes it to the conversational model only after asking whether more help is needed, and the model decides from the caller's natural-language answer whether it is a clear no (no fixed phrase allowlist). This is not an alternative public registration/reset endpoint. Inactive calls return `401`; an in-progress duplicate action may return `409`.
 
 Email action examples:
 
 ```json
 { "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "prepare_email", "recipientPhone": "9876543210", "subject": "Hello", "textBody": "A plain-text message" }
 { "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "send_email", "draftId": "<prepared draft UUID>", "recipientPhone": "9876543210" }
+{ "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "prepare_scheduled_email", "recipientPhone": "9876543210", "subject": "Hello", "textBody": "A plain-text message", "delaySeconds": 300 }
+{ "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "schedule_email", "draftId": "<prepared draft UUID>" }
+{ "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "list_scheduled_emails" }
+{ "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "reschedule_scheduled_email", "emailId": "<email public UUID>", "delaySeconds": 3600 }
+{ "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "cancel_scheduled_email", "emailId": "<email public UUID>" }
 { "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "discard_email", "draftId": "<prepared draft UUID>" }
 ```
 
 `prepare_email` validates the sender against the active call's phone and requires the recipient to be an existing active account. `recipientPhone` is the recipient's ten-digit Indian phone number; the API derives `recipientAddress` by appending `LOCAL_MAIL_DOMAIN`. Subject and `textBody` are also required; subject is limited to 998 characters and the plain-text body to 12,000 characters. It stores one replaceable draft under that call ID in Redis for 15 minutes and returns `{ "action": "prepare_email", "status": "prepared", "draftId": "...", "recipientAddress": "...", "subject": "..." }`. It does not send mail. `send_email` requires the matching draft ID and queues the message through the existing email worker, returning `{ "action": "send_email", "status": "queued", "publicId": "...", "recipientAddress": "..." }`; a synchronous send failure returns `{ "action": "send_email", "status": "failed", "failureNotificationQueued": true|false }`. The voice agent invokes it only after the confirmation prompt and the conversational model interprets a clear affirmative. The `recipientPhone` is included so a confirmed attempt that fails before queueing can still be identified in the sender's SMS. After queue acceptance, the voice agent tells the caller the recipient should receive the email shortly. If the confirmed send fails before queueing or after SMTP retries are exhausted, Syscall queues an SMS to the sender naming the recipient number. Draft validation failures and cancellations do not send a failure SMS. `discard_email` removes the matching pending draft. Closing the call removes any pending draft. These actions are voice-agent-only; normal frontend mail must continue using the authenticated `/api/mail/send` route.
+
+For `prepare_scheduled_email`, the API validates the recipient and resolves exactly one `scheduledAt` or `delaySeconds` value against its own clock, then stages the complete message and normalized UTC time in the call-scoped Redis draft. `schedule_email` is available only after the agent has read back the email and exact IST delivery time and the caller affirmatively confirms on the next turn. It creates a complete `scheduled` email record and delayed job; the voice agent says it is scheduled, not already sent. Relative delays are anchored when the API prepares the schedule; 2 days means exactly 48 hours. Absolute voice times must include the India `+05:30` offset. The fresh server time and `Asia/Kolkata` context are supplied to the agent on each caller turn.
+
+`list_scheduled_emails` returns pending sender-owned schedule IDs and summaries for the agent to identify a requested message. `cancel_scheduled_email` and `reschedule_scheduled_email` affect only sender-owned records whose status is still `scheduled`; reschedule accepts one new relative delay or explicit-offset timestamp. For voice-scheduled emails, no failure SMS is sent when a schedule is created, edited, or cancelled. If the eventual SMTP attempt begins and exhausts retries, the sender is notified by SMS with the recipient number. Immediate confirmed voice-send failure notifications retain their existing behavior.
 
 #### `POST /internal/voice/sessions/close`
 
@@ -564,6 +610,10 @@ Fetch `GET /api/mail`; the backend returns at most 100 latest records. Open by `
 | `POST` | `/api/auth/reset-password` | Frontend |
 | `POST` | `/calls/start` | Frontend, explicit call action |
 | `POST` | `/api/mail/send` | Frontend, authenticated |
+| `POST` | `/api/mail/scheduled` | Frontend, authenticated |
+| `GET` | `/api/mail/scheduled` | Frontend, authenticated |
+| `PATCH` | `/api/mail/scheduled/:publicId` | Frontend, authenticated sender |
+| `DELETE` | `/api/mail/scheduled/:publicId` | Frontend, authenticated sender |
 | `GET` | `/api/mail` | Frontend, authenticated |
 | `GET` | `/api/mail/:publicId` | Frontend, authenticated |
 | `DELETE` | `/api/mail/:publicId` | Frontend, authenticated |
@@ -579,6 +629,7 @@ Fetch `GET /api/mail`; the backend returns at most 100 latest records. Open by `
 | `POST` | `/webhooks/telnyx/sms` | Telnyx only |
 | `POST` | `/internal/voice/sessions/activate` | Voice-agent only |
 | `POST` | `/internal/voice/actions` | Voice-agent only |
+| `POST` | `/internal/voice/time-context` | Voice-agent only |
 | `POST` | `/internal/voice/sessions/close` | Voice-agent only |
 | `GET` | `:4000/health` | Operations only |
 | `WS` | `/voice-stream?ticket=...` | Telnyx only |

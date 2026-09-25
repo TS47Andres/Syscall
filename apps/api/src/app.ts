@@ -13,11 +13,11 @@ import { AuditLog, Draft, Email, User, WebhookEvent, pingDatabase, type UserDocu
 import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue, queueEmailFailureSms } from '@syscall/queues';
 import { hangupCall, startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
 import { isTelnyxConfigured } from '@syscall/config';
-import { toLocalAddress, toPhoneE164, addressSchema, passwordSchema, phone10Schema, phoneSchema } from '@syscall/validation';
+import { toLocalAddress, toPhoneE164, addressSchema, passwordSchema, phone10Schema, phoneSchema, resolveScheduleTime, scheduleTimeZone } from '@syscall/validation';
 import { scanWithClamAv } from '@syscall/mail';
 import type { AppConfig } from '@syscall/config';
 import { createLogger } from '@syscall/logging';
-import { audit, createSession, ensureUserForPhone, hashPassword, hashSecret, persistAttachments, purgeEmail, queueEmail, queueSms, requestOtp, requestPasswordReset, resolveSession, revokeAllSessions, revokeSession, verifyOtp, type ServiceContext } from './services.js';
+import { audit, cancelScheduledEmail, createSession, ensureUserForPhone, hashPassword, hashSecret, persistAttachments, purgeEmail, queueEmail, queueSms, requestOtp, requestPasswordReset, resolveSession, rescheduleEmail, revokeAllSessions, revokeSession, scheduleEmail, verifyOtp, type ServiceContext } from './services.js';
 
 const voiceEmailDraftTtlSeconds = 15 * 60;
 
@@ -40,6 +40,12 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
 
   // Creates an HTTP-aware error without requiring a global error plugin.
   function httpError(statusCode: number, message: string): Error & { statusCode: number } { return Object.assign(new Error(message), { statusCode }); }
+
+  // Converts caller-supplied absolute or relative schedule input using the API clock.
+  function scheduleTime(input: { scheduledAt?: string; delaySeconds?: number }): Date {
+    try { return resolveScheduleTime(input); }
+    catch (error) { throw httpError(400, error instanceof Error ? error.message : 'Scheduled time is invalid.'); }
+  }
 
   // Converts an authenticated session header into a user or a 401 response.
   async function requireUser(request: FastifyRequest): Promise<UserDocument> {
@@ -177,10 +183,20 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     return { status: 'active' };
   });
 
+  // Returns an authoritative clock and timezone only for a live authenticated voice call.
+  app.post('/internal/voice/time-context', async (request) => {
+    requireVoiceAgent(request);
+    const body = z.object({ callControlId: z.string().min(10) }).parse(request.body);
+    if (!await redis.exists(`voice:call:${body.callControlId}`)) throw httpError(401, 'Voice call is not active.');
+    const now = new Date();
+    const localTime = new Intl.DateTimeFormat('en-IN', { dateStyle: 'full', timeStyle: 'long', timeZone: scheduleTimeZone }).format(now);
+    return { now: now.toISOString(), timeZone: scheduleTimeZone, localTime };
+  });
+
   // Executes narrow account, mail, and call-control actions for a verified voice call.
   app.post('/internal/voice/actions', async (request) => {
     requireVoiceAgent(request);
-    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['create_account', 'request_password_reset', 'end_call', 'prepare_email', 'send_email', 'discard_email']), recipientPhone: phone10Schema.optional(), subject: z.string().max(998).optional(), textBody: z.string().max(12000).optional(), draftId: z.string().uuid().optional() }).parse(request.body);
+    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['create_account', 'request_password_reset', 'end_call', 'prepare_email', 'prepare_scheduled_email', 'send_email', 'schedule_email', 'discard_email', 'list_scheduled_emails', 'cancel_scheduled_email', 'reschedule_scheduled_email']), recipientPhone: phone10Schema.optional(), subject: z.string().max(998).optional(), textBody: z.string().max(12000).optional(), draftId: z.string().uuid().optional(), emailId: z.string().optional(), scheduledAt: z.string().optional(), delaySeconds: z.number().int().optional() }).parse(request.body);
     const call = await redis.get(`voice:call:${body.callControlId}`);
     if (!call) throw httpError(401, 'Voice call is not active.');
     const { phoneE164 } = JSON.parse(call) as { phoneE164: string };
@@ -192,7 +208,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
       throw httpError(409, 'This voice action is already being processed.');
     }
     try {
-      let result: Record<string, unknown>;
+      let result: Record<string, unknown> = { action: body.action, status: 'not_allowed' };
       if (body.action === 'create_account') {
         const created = await ensureUserForPhone(config, phoneE164);
         await audit('voice_account_creation_attempt', created.user._id, [], { created: created.created });
@@ -208,7 +224,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
         await hangupCall(config, body.callControlId);
         logger.info('Telnyx accepted voice-agent hang-up command');
         result = { action: body.action, accepted: true };
-      } else if (body.action === 'prepare_email') {
+      } else if (body.action === 'prepare_email' || body.action === 'prepare_scheduled_email') {
         if (!body.recipientPhone || body.subject === undefined || !body.textBody?.trim()) throw httpError(400, 'A recipient phone number, subject, and message body are required.');
         const recipientAddress = toLocalAddress(body.recipientPhone, config.LOCAL_MAIL_DOMAIN);
         const sender = await User.findOne({ phoneE164, accountStatus: 'active' });
@@ -216,10 +232,17 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
         if (!sender) result = { action: body.action, status: 'sender_account_unavailable' };
         else if (!recipient) result = { action: body.action, status: 'recipient_unavailable' };
         else {
+          let scheduledAt: Date | undefined;
+          if (body.action === 'prepare_scheduled_email') {
+            try { scheduledAt = scheduleTime({ scheduledAt: body.scheduledAt, delaySeconds: body.delaySeconds }); }
+            catch (error) { result = { action: body.action, status: 'invalid_schedule', reason: error instanceof Error ? error.message : 'Scheduled time is invalid.' }; }
+          }
+          if (body.action === 'prepare_email' || scheduledAt) {
           const draftId = crypto.randomUUID();
-          const pendingEmail = { draftId, to: recipientAddress, subject: body.subject, textBody: body.textBody.trim() };
+          const pendingEmail = { draftId, to: recipientAddress, subject: body.subject, textBody: body.textBody.trim(), ...(scheduledAt ? { scheduledAt: scheduledAt.toISOString() } : {}) };
           await redis.set(`voice:pending-email:${body.callControlId}`, JSON.stringify(pendingEmail), 'EX', voiceEmailDraftTtlSeconds);
-          result = { action: body.action, status: 'prepared', draftId, recipientAddress, subject: body.subject };
+          result = { action: body.action, status: 'prepared', draftId, recipientAddress, subject: body.subject, ...(scheduledAt ? { scheduledAt: scheduledAt.toISOString() } : {}) };
+          }
         }
       } else if (body.action === 'send_email') {
         if (!body.draftId) throw httpError(400, 'A prepared email draft is required.');
@@ -227,8 +250,8 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
         let notificationRecipientPhone10 = phone10Schema.parse(body.recipientPhone);
         try {
           const pendingValue = await redis.get(`voice:pending-email:${body.callControlId}`);
-          const pendingEmail = pendingValue ? JSON.parse(pendingValue) as { draftId: string; to: string; subject: string; textBody: string } : null;
-          if (!pendingEmail || pendingEmail.draftId !== body.draftId) throw new Error('Confirmed email draft is unavailable.');
+          const pendingEmail = pendingValue ? JSON.parse(pendingValue) as { draftId: string; to: string; subject: string; textBody: string; scheduledAt?: string } : null;
+          if (!pendingEmail || pendingEmail.draftId !== body.draftId || pendingEmail.scheduledAt) throw new Error('Confirmed email draft is unavailable for immediate delivery.');
           notificationRecipientPhone10 = phone10Schema.parse(pendingEmail.to.split('@')[0]);
           if (notificationRecipientPhone10 !== body.recipientPhone) throw new Error('Confirmed email recipient did not match the prepared draft.');
           const sender = await User.findOne({ phoneE164, accountStatus: 'active' });
@@ -246,6 +269,45 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
           const failureNotificationQueued = await notifyFailedVoiceEmail(phoneE164, notificationRecipientPhone10, body.actionId);
           result = { action: body.action, status: 'failed', failureNotificationQueued };
         }
+      } else if (body.action === 'schedule_email') {
+        if (!body.draftId) throw httpError(400, 'A confirmed scheduled email is required.');
+        const pendingValue = await redis.get(`voice:pending-email:${body.callControlId}`);
+        const pendingEmail = pendingValue ? JSON.parse(pendingValue) as { draftId: string; to: string; subject: string; textBody: string; scheduledAt?: string } : null;
+        if (!pendingEmail || pendingEmail.draftId !== body.draftId || !pendingEmail.scheduledAt) throw httpError(409, 'The scheduled email confirmation is no longer available.');
+        const sender = await User.findOne({ phoneE164, accountStatus: 'active' });
+        if (!sender) throw httpError(409, 'The active sender account is unavailable.');
+        let scheduledAt: Date;
+        try { scheduledAt = scheduleTime({ scheduledAt: pendingEmail.scheduledAt }); }
+        catch (error) {
+          result = { action: body.action, status: 'invalid_schedule', reason: error instanceof Error ? error.message : 'Scheduled time is no longer valid.' };
+          await redis.set(actionKey, JSON.stringify(result), 'EX', 3600);
+          return result;
+        }
+        const email = await scheduleEmail(context, sender, pendingEmail.to, pendingEmail.subject, pendingEmail.textBody, null, [], scheduledAt, true, body.actionId);
+        try { await redis.del(`voice:pending-email:${body.callControlId}`); }
+        catch (error) { logger.warn({ err: error }, 'Scheduled voice email but could not clear its staged draft'); }
+        result = { action: body.action, status: email.deliveryStatus === 'scheduled' ? 'scheduled' : 'already_processed', deliveryStatus: email.deliveryStatus, publicId: email.publicId, recipientAddress: email.recipientAddress, scheduledAt: email.scheduledAt?.toISOString() };
+      } else if (body.action === 'list_scheduled_emails') {
+        const sender = await User.findOne({ phoneE164, accountStatus: 'active' });
+        const emails = sender ? await Email.find({ senderUserId: sender._id, deliveryStatus: 'scheduled', senderDeletedAt: null }).select({ publicId: 1, recipientAddress: 1, subject: 1, scheduledAt: 1 }).sort({ scheduledAt: 1 }).limit(20).lean() : [];
+        result = { action: body.action, status: 'listed', emails: emails.map((email) => ({ emailId: email.publicId, recipientAddress: email.recipientAddress, subject: email.subject, scheduledAt: email.scheduledAt?.toISOString() })) };
+      } else if (body.action === 'cancel_scheduled_email') {
+        if (!body.emailId) throw httpError(400, 'Scheduled email ID is required.');
+        const sender = await User.findOne({ phoneE164, accountStatus: 'active' });
+        const email = sender ? await cancelScheduledEmail(context, sender, body.emailId) : null;
+        result = email ? { action: body.action, status: 'cancelled', emailId: email.publicId } : { action: body.action, status: 'not_pending_or_unavailable' };
+      } else if (body.action === 'reschedule_scheduled_email') {
+        if (!body.emailId) throw httpError(400, 'Scheduled email ID is required.');
+        const sender = await User.findOne({ phoneE164, accountStatus: 'active' });
+        if (!sender) throw httpError(409, 'The active sender account is unavailable.');
+        let scheduledAt: Date | undefined;
+        let scheduleError = 'Scheduled time is invalid.';
+        try { scheduledAt = scheduleTime({ scheduledAt: body.scheduledAt, delaySeconds: body.delaySeconds }); }
+        catch (error) { scheduleError = error instanceof Error ? error.message : scheduleError; }
+        if (scheduledAt) {
+          const email = await rescheduleEmail(context, sender, body.emailId, scheduledAt);
+          result = email ? { action: body.action, status: 'rescheduled', emailId: email.publicId, scheduledAt: email.scheduledAt?.toISOString() } : { action: body.action, status: 'not_pending_or_unavailable' };
+        } else result = { action: body.action, status: 'invalid_schedule', reason: scheduleError };
       } else {
         if (!body.draftId) throw httpError(400, 'A prepared email draft is required.');
         const pendingKey = `voice:pending-email:${body.callControlId}`;
@@ -284,14 +346,74 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     return reply.code(202).send({ publicId, deliveryStatus: 'queued' });
   });
 
-  app.get('/api/mail', async (request) => { const user = await requireUser(request); const messages = await Email.find({ $or: [{ recipientUserId: user._id, recipientDeletedAt: null }, { senderUserId: user._id, senderDeletedAt: null }] }).sort({ createdAt: -1 }).limit(100).lean(); return messages.map((message) => ({ ...message, _id: undefined })); });
+  // Creates a complete authenticated email and its durable delayed-delivery job.
+  app.post('/api/mail/scheduled', async (request, reply) => {
+    const user = await requireUser(request);
+    if (!user.passwordConfigured) throw httpError(403, 'Set a password before using mail.');
+    const body = z.object({ to: addressSchema, subject: z.string().max(998), textBody: z.string().default(''), htmlBody: z.string().nullable().optional(), attachments: z.array(z.object({ filename: z.string().min(1), contentType: z.string(), contentBase64: z.string() })).optional(), scheduledAt: z.string().datetime({ offset: true }) }).parse(request.body);
+    const scheduledAt = scheduleTime({ scheduledAt: body.scheduledAt });
+    const attachments = await persistAttachments(context, body.attachments);
+    const email = await scheduleEmail(context, user, body.to, body.subject, body.textBody, body.htmlBody ?? null, attachments, scheduledAt);
+    return reply.code(202).send({ publicId: email.publicId, deliveryStatus: email.deliveryStatus, scheduledAt: email.scheduledAt?.toISOString() });
+  });
 
-  app.get('/api/mail/:publicId', async (request) => { const user = await requireUser(request); const params = z.object({ publicId: z.string() }).parse(request.params); const email = await Email.findOne({ publicId: params.publicId }); const isSender = Boolean(email && email.senderUserId.equals(user._id)); const isRecipient = Boolean(email && email.recipientUserId.equals(user._id)); if (!email || (!isSender && !isRecipient) || (isSender && email.senderDeletedAt) || (isRecipient && email.recipientDeletedAt)) throw httpError(404, 'Message not found.'); if (isRecipient && !email.readAt) { email.readAt = new Date(); await email.save(); await audit('message_read', user._id, [email.publicId]); } const output = email.toObject() as unknown as Record<string, unknown>; delete output._id; delete output.__v; return output; });
+  // Lists only pending schedules owned by the authenticated sender.
+  app.get('/api/mail/scheduled', async (request) => {
+    const user = await requireUser(request);
+    const emails = await Email.find({ senderUserId: user._id, senderDeletedAt: null, deliveryStatus: 'scheduled' }).select({ _id: 0, publicId: 1, recipientAddress: 1, subject: 1, scheduledAt: 1, createdAt: 1 }).sort({ scheduledAt: 1 }).limit(100).lean();
+    return emails;
+  });
 
-  app.delete('/api/mail/:publicId', async (request) => { const user = await requireUser(request); const params = z.object({ publicId: z.string() }).parse(request.params); const email = await Email.findOne({ publicId: params.publicId }); if (!email) throw httpError(404, 'Message not found.'); const isSender = email.senderUserId.equals(user._id); const isRecipient = email.recipientUserId.equals(user._id); if (!isSender && !isRecipient) throw httpError(404, 'Message not found.'); if (isSender) email.senderDeletedAt = new Date(); if (isRecipient) email.recipientDeletedAt = new Date(); await email.save(); await audit('message_soft_deleted', user._id, [email.publicId], { role: isSender ? 'sender' : 'recipient' }); if (email.senderDeletedAt && email.recipientDeletedAt) await purgeEmail(context, email); return { status: 'deleted' }; });
+  // Changes only the delivery time of a sender-owned pending schedule.
+  app.patch('/api/mail/scheduled/:publicId', async (request) => {
+    const user = await requireUser(request);
+    const params = z.object({ publicId: z.string().min(1) }).parse(request.params);
+    const body = z.object({ scheduledAt: z.string().datetime({ offset: true }) }).parse(request.body);
+    const scheduledAt = scheduleTime({ scheduledAt: body.scheduledAt });
+    const email = await rescheduleEmail(context, user, params.publicId, scheduledAt);
+    if (!email) {
+      const owned = await Email.exists({ publicId: params.publicId, senderUserId: user._id });
+      throw httpError(owned ? 409 : 404, owned ? 'Email is no longer scheduled.' : 'Scheduled email not found.');
+    }
+    return { publicId: email.publicId, deliveryStatus: email.deliveryStatus, scheduledAt: email.scheduledAt?.toISOString() };
+  });
 
-  app.post('/api/mail/:publicId/spam', async (request) => { const user = await requireUser(request); const params = z.object({ publicId: z.string() }).parse(request.params); const email = await Email.findOne({ publicId: params.publicId, recipientUserId: user._id }); if (!email) throw httpError(404, 'Message not found.'); email.isSpam = true; await email.save(); return { isSpam: true }; });
-  app.delete('/api/mail/:publicId/spam', async (request) => { const user = await requireUser(request); const params = z.object({ publicId: z.string() }).parse(request.params); const email = await Email.findOne({ publicId: params.publicId, recipientUserId: user._id }); if (!email) throw httpError(404, 'Message not found.'); email.isSpam = false; await email.save(); return { isSpam: false }; });
+  // Cancels a sender-owned scheduled email before its worker begins delivery.
+  app.delete('/api/mail/scheduled/:publicId', async (request) => {
+    const user = await requireUser(request);
+    const params = z.object({ publicId: z.string().min(1) }).parse(request.params);
+    const email = await cancelScheduledEmail(context, user, params.publicId);
+    if (!email) {
+      const owned = await Email.exists({ publicId: params.publicId, senderUserId: user._id });
+      throw httpError(owned ? 409 : 404, owned ? 'Email is no longer scheduled.' : 'Scheduled email not found.');
+    }
+    return { publicId: email.publicId, deliveryStatus: email.deliveryStatus };
+  });
+
+  app.get('/api/mail', async (request) => { const user = await requireUser(request); const messages = await Email.find({ $or: [{ recipientUserId: user._id, recipientDeletedAt: null, deliveryStatus: { $nin: ['scheduled', 'cancelled'] } }, { senderUserId: user._id, senderDeletedAt: null }] }).sort({ createdAt: -1 }).limit(100).lean(); return messages.map((message) => ({ ...message, _id: undefined })); });
+
+  app.get('/api/mail/:publicId', async (request) => { const user = await requireUser(request); const params = z.object({ publicId: z.string() }).parse(request.params); const email = await Email.findOne({ publicId: params.publicId }); const isSender = Boolean(email && email.senderUserId.equals(user._id)); const isRecipient = Boolean(email && email.recipientUserId.equals(user._id)); if (!email || (!isSender && !isRecipient) || (isSender && email.senderDeletedAt) || (isRecipient && email.recipientDeletedAt) || (!isSender && ['scheduled', 'cancelled'].includes(email.deliveryStatus))) throw httpError(404, 'Message not found.'); if (isRecipient && !email.readAt) { email.readAt = new Date(); await email.save(); await audit('message_read', user._id, [email.publicId]); } const output = email.toObject() as unknown as Record<string, unknown>; delete output._id; delete output.__v; return output; });
+
+  // Prevents generic mailbox deletion from silently leaving a scheduled job active.
+  app.delete('/api/mail/:publicId', async (request) => {
+    const user = await requireUser(request);
+    const params = z.object({ publicId: z.string() }).parse(request.params);
+    const email = await Email.findOne({ publicId: params.publicId });
+    if (!email) throw httpError(404, 'Message not found.');
+    const isSender = email.senderUserId.equals(user._id);
+    const isRecipient = email.recipientUserId.equals(user._id);
+    if ((!isSender && !isRecipient) || ((!isSender) && ['scheduled', 'cancelled'].includes(email.deliveryStatus))) throw httpError(404, 'Message not found.');
+    if (email.deliveryStatus === 'scheduled') throw httpError(409, 'Cancel the scheduled email before deleting it.');
+    if (isSender) email.senderDeletedAt = new Date();
+    if (isRecipient) email.recipientDeletedAt = new Date();
+    await email.save();
+    await audit('message_soft_deleted', user._id, [email.publicId], { role: isSender ? 'sender' : 'recipient' });
+    if (email.senderDeletedAt && email.recipientDeletedAt) await purgeEmail(context, email);
+    return { status: 'deleted' };
+  });
+
+  app.post('/api/mail/:publicId/spam', async (request) => { const user = await requireUser(request); const params = z.object({ publicId: z.string() }).parse(request.params); const email = await Email.findOne({ publicId: params.publicId, recipientUserId: user._id, deliveryStatus: { $nin: ['scheduled', 'cancelled'] } }); if (!email) throw httpError(404, 'Message not found.'); email.isSpam = true; await email.save(); return { isSpam: true }; });
+  app.delete('/api/mail/:publicId/spam', async (request) => { const user = await requireUser(request); const params = z.object({ publicId: z.string() }).parse(request.params); const email = await Email.findOne({ publicId: params.publicId, recipientUserId: user._id, deliveryStatus: { $nin: ['scheduled', 'cancelled'] } }); if (!email) throw httpError(404, 'Message not found.'); email.isSpam = false; await email.save(); return { isSpam: false }; });
 
   app.post('/api/drafts', async (request) => { const user = await requireUser(request); const body = z.object({ to: addressSchema.nullable().optional(), subject: z.string().max(998).default(''), textBody: z.string().default(''), htmlBody: z.string().nullable().optional(), attachments: z.array(z.object({ filename: z.string().min(1), contentType: z.string(), contentBase64: z.string() })).optional() }).parse(request.body); const attachments = await persistAttachments(context, body.attachments); const draft = await Draft.create({ ownerUserId: user._id, recipientAddress: body.to ?? null, subject: body.subject, textBody: body.textBody, htmlBody: body.htmlBody ?? null, attachments }); return { publicId: draft.publicId }; });
   app.get('/api/drafts', async (request) => { const user = await requireUser(request); return Draft.find({ ownerUserId: user._id }).sort({ updatedAt: -1 }).lean(); });

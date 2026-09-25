@@ -8,10 +8,10 @@ import fs from 'node:fs/promises';
 import argon2 from 'argon2';
 import type { Redis } from 'ioredis';
 import { v7 as uuidv7 } from 'uuid';
-import { AuditLog, Draft, Email, ResetToken, User, type UserDocument, type AttachmentMetadata } from '@syscall/db';
+import { AuditLog, Draft, Email, ResetToken, User, type EmailDocument, type UserDocument, type AttachmentMetadata } from '@syscall/db';
 import { toLocalAddress, toPhone10, toPhoneE164, passwordSchema } from '@syscall/validation';
 import { writeGeneratedFile, validateAttachment } from '@syscall/mail';
-import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue, type SmsSendJob } from '@syscall/queues';
+import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue, enqueueScheduledEmail, scheduledEmailJobId, type SmsSendJob } from '@syscall/queues';
 import type { AppConfig } from '@syscall/config';
 import { createLogger } from '@syscall/logging';
 
@@ -174,6 +174,118 @@ export async function queueEmail(context: ServiceContext, sender: UserDocument, 
     logger.error({ emailId: email.publicId, err: error }, 'Could not record queued email audit event');
   }
   return email.publicId;
+}
+
+// Persists a complete scheduled email before adding its durable delayed delivery job.
+export async function scheduleEmail(context: ServiceContext, sender: UserDocument, recipientAddress: string, subject: string, textBody: string, htmlBody: string | null, attachments: AttachmentMetadata[], scheduledAt: Date, scheduledByVoice = false, scheduleActionId?: string): Promise<EmailDocument> {
+  if (scheduleActionId) {
+    const priorSchedule = await Email.findOne({ scheduleActionId });
+    if (priorSchedule) return priorSchedule;
+  }
+  const recipient = await User.findOne({ emailAddress: recipientAddress, accountStatus: 'active' });
+  if (!recipient) {
+    await removeStoredAttachments(context, attachments);
+    throw Object.assign(new Error('Recipient must be an existing active Syscall account.'), { statusCode: 400 });
+  }
+  let email: EmailDocument;
+  try {
+    email = await Email.create({
+      senderUserId: sender._id,
+      senderAddress: sender.emailAddress,
+      recipientUserId: recipient._id,
+      recipientAddress,
+      subject,
+      textBody,
+      htmlBody,
+      attachments,
+      rawMimePath: '',
+      messageIdHeader: `<${uuidv7()}@${context.config.LOCAL_MAIL_DOMAIN}>`,
+      deliveryStatus: 'scheduled',
+      scheduledAt,
+      scheduleVersion: 1,
+      scheduledByVoice,
+      ...(scheduleActionId ? { scheduleActionId } : {}),
+    });
+  } catch (error) {
+    if (scheduleActionId && (error as { code?: number }).code === 11000) {
+      const priorSchedule = await Email.findOne({ scheduleActionId });
+      if (priorSchedule) return priorSchedule;
+    }
+    await removeStoredAttachments(context, attachments);
+    throw error;
+  }
+  try {
+    await enqueueScheduledEmail(context.outboundQueue, { emailId: email.publicId, scheduleVersion: email.scheduleVersion, scheduledAt });
+  } catch (error) {
+    try { await Email.deleteOne({ _id: email._id }); }
+    catch (cleanupError) { logger.error({ emailId: email.publicId, err: cleanupError }, 'Could not remove scheduled email after enqueue failure'); }
+    await removeStoredAttachments(context, attachments, email.publicId);
+    throw error;
+  }
+  try {
+    await audit('email_scheduled', sender._id, [email.publicId], { scheduledAt: scheduledAt.toISOString(), scheduledByVoice });
+  } catch (error) {
+    logger.error({ emailId: email.publicId, err: error }, 'Could not record scheduled email audit event');
+  }
+  return email;
+}
+
+// Changes a pending schedule by publishing the replacement job before updating its version.
+export async function rescheduleEmail(context: ServiceContext, sender: UserDocument, publicId: string, scheduledAt: Date): Promise<EmailDocument | null> {
+  const current = await Email.findOne({ publicId, senderUserId: sender._id, deliveryStatus: 'scheduled' });
+  if (!current) return null;
+  const previousVersion = current.scheduleVersion;
+  const nextVersion = previousVersion + 1;
+  await enqueueScheduledEmail(context.outboundQueue, { emailId: current.publicId, scheduleVersion: nextVersion, scheduledAt });
+  const updated = await Email.findOneAndUpdate(
+    { _id: current._id, senderUserId: sender._id, deliveryStatus: 'scheduled', scheduleVersion: previousVersion },
+    { $set: { scheduledAt, scheduleVersion: nextVersion } },
+    { new: true },
+  );
+  if (!updated) {
+    await removeScheduledEmailJob(context, current.publicId, nextVersion);
+    return null;
+  }
+  await removeScheduledEmailJob(context, current.publicId, previousVersion);
+  try {
+    await audit('email_rescheduled', sender._id, [updated.publicId], { scheduledAt: scheduledAt.toISOString() });
+  } catch (error) {
+    logger.error({ emailId: updated.publicId, err: error }, 'Could not record rescheduled email audit event');
+  }
+  return updated;
+}
+
+// Cancels a pending email atomically so a due worker cannot begin delivery afterward.
+export async function cancelScheduledEmail(context: ServiceContext, sender: UserDocument, publicId: string): Promise<EmailDocument | null> {
+  const cancelled = await Email.findOneAndUpdate(
+    { publicId, senderUserId: sender._id, deliveryStatus: 'scheduled' },
+    { $set: { deliveryStatus: 'cancelled' }, $inc: { scheduleVersion: 1 } },
+    { new: true },
+  );
+  if (!cancelled) return null;
+  await removeScheduledEmailJob(context, publicId, cancelled.scheduleVersion - 1);
+  try {
+    await audit('email_schedule_cancelled', sender._id, [cancelled.publicId]);
+  } catch (error) {
+    logger.error({ emailId: cancelled.publicId, err: error }, 'Could not record scheduled email cancellation');
+  }
+  return cancelled;
+}
+
+// Removes a delayed job best-effort; its persisted schedule version still prevents stale delivery.
+async function removeScheduledEmailJob(context: ServiceContext, emailId: string, scheduleVersion: number): Promise<void> {
+  try {
+    const job = await context.outboundQueue.getJob(scheduledEmailJobId(emailId, scheduleVersion));
+    if (job) await job.remove();
+  } catch (error) { logger.warn({ emailId, scheduleVersion, err: error }, 'Could not remove stale scheduled email job'); }
+}
+
+// Removes generated attachment files when a schedule cannot be created.
+async function removeStoredAttachments(context: ServiceContext, attachments: AttachmentMetadata[], emailId?: string): Promise<void> {
+  for (const attachment of attachments) {
+    try { await safeRemove(context.config.ATTACHMENT_STORAGE_PATH, attachment.storageKey); }
+    catch (error) { logger.error({ emailId, err: error }, 'Could not clean up attachment after schedule creation failure'); }
+  }
 }
 
 // Deletes a generated file tree entry only after both participants soft-delete a message.

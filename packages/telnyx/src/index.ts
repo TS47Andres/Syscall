@@ -39,6 +39,11 @@ export async function startOutboundCall(config: AppConfig, input: TelnyxCallInpu
   });
 }
 
+// Ends an active Telnyx call through its Call Control ID.
+export async function hangupCall(config: AppConfig, callControlId: string): Promise<Record<string, unknown>> {
+  return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/hangup`, { command_id: crypto.randomUUID() });
+}
+
 // Sends an SMS through the configured Telnyx messaging profile.
 export async function sendSms(config: AppConfig, input: TelnyxMessageInput): Promise<Record<string, unknown>> {
   const sender = config.TELNYX_MESSAGING_SENDER_ID || config.TELNYX_PHONE_NUMBER;

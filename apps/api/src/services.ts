@@ -13,6 +13,9 @@ import { toLocalAddress, toPhone10, toPhoneE164, passwordSchema } from '@syscall
 import { writeGeneratedFile, validateAttachment } from '@syscall/mail';
 import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue, type SmsSendJob } from '@syscall/queues';
 import type { AppConfig } from '@syscall/config';
+import { createLogger } from '@syscall/logging';
+
+const logger = createLogger('api-services');
 
 export interface ServiceContext {
   config: AppConfig;
@@ -152,12 +155,24 @@ export async function persistAttachments(context: ServiceContext, attachments: A
 }
 
 // Builds an email record owned by the authenticated sender before queueing delivery.
-export async function queueEmail(context: ServiceContext, sender: UserDocument, recipientAddress: string, subject: string, textBody: string, htmlBody: string | null, attachments: AttachmentMetadata[]): Promise<string> {
+export async function queueEmail(context: ServiceContext, sender: UserDocument, recipientAddress: string, subject: string, textBody: string, htmlBody: string | null, attachments: AttachmentMetadata[], failureNotification?: { phoneE164: string; recipientPhone10: string; dedupeKey: string }): Promise<string> {
   const recipient = await User.findOne({ emailAddress: recipientAddress, accountStatus: 'active' });
   if (!recipient) throw new Error('Recipient must be an existing active @niti user.');
   const email = await Email.create({ senderUserId: sender._id, senderAddress: sender.emailAddress, recipientUserId: recipient._id, recipientAddress, subject, textBody, htmlBody, attachments, rawMimePath: '', messageIdHeader: `<${uuidv7()}@${context.config.LOCAL_MAIL_DOMAIN}>`, deliveryStatus: 'queued' });
-  await context.outboundQueue.add('outbound-email', { emailId: email.publicId }, { attempts: 3, backoff: { type: 'custom' } });
-  await audit('email_queued', sender._id, [email.publicId]);
+  try {
+    await context.outboundQueue.add('outbound-email', { emailId: email.publicId, ...(failureNotification ? { failureNotification } : {}) }, { attempts: 3, backoff: { type: 'custom' } });
+  } catch (error) {
+    email.deliveryStatus = 'failed';
+    email.failedAt = new Date();
+    email.lastDeliveryError = error instanceof Error ? error.message.slice(0, 1000) : 'Queueing failed';
+    await email.save();
+    throw error;
+  }
+  try {
+    await audit('email_queued', sender._id, [email.publicId]);
+  } catch (error) {
+    logger.error({ emailId: email.publicId, err: error }, 'Could not record queued email audit event');
+  }
   return email.publicId;
 }
 

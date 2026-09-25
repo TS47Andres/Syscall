@@ -43,7 +43,7 @@ services:
       ATTACHMENT_STORAGE_PATH: /var/lib/syscall/attachments
       RAW_MAIL_STORAGE_PATH: /var/lib/syscall/raw-mail
     ports:
-      - "127.0.0.1:${API_PORT:-3000}:3000"
+      - "${API_PORT:-3000}:3000"
     volumes:
       - mail-storage:/var/lib/syscall
     depends_on:

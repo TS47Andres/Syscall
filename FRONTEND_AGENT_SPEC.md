@@ -264,7 +264,7 @@ Response `200`:
 
 This confirms Telnyx accepted the call request; it does not confirm that the person answered, the media stream connected, or the conversation completed. There is no public call-status endpoint or call-history endpoint currently. Missing voice-agent token or public HTTPS URL returns `503`; invalid phone returns `400`. Telnyx credentials are also required for the provider request to succeed. This endpoint currently has no session authentication or call-rate limit in its route handler, so the frontend must only expose it as an explicit, protected product action; frontend checks alone are not an adequate abuse-control mechanism for a public deployment.
 
-During the live call, the assistant carries on a natural conversation and can invoke account creation or request a password-reset SMS when the caller asks. A clear account-creation request directly invokes the creation action without a separate confirmation turn. There is no IVR/keypad menu or DTMF-triggered action. The opening prompt is English/Hindi and asks the caller to speak their preferred language. Supported Sarvam voice locales are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia; response language and TTS voice are selected per caller turn, so the caller may switch languages during a call.
+During the live call, the assistant carries on a natural conversation and can invoke account creation or request a password-reset SMS when the caller asks. It can also compose plain-text email for an existing active Syscall recipient. The caller supplies only the recipient's ten-digit phone number; the API appends `LOCAL_MAIL_DOMAIN` and verifies the account. The agent collects or revises the recipient, subject, and body across turns, reads back the resulting address and a concise summary, and asks for confirmation. On the following caller turn, the voice-agent exposes the send action only for that staged email; Sarvam interprets whether the response is an unambiguous affirmative in context and in the caller's language, without a hardcoded phrase list. Attachments are not supported by the voice flow. A clear account-creation request directly invokes the creation action without a separate confirmation turn. There is no IVR/keypad menu or DTMF-triggered action. After completing a request, it asks whether the caller needs any other help in the current language; if the caller's contextual response is a clear decline, Sarvam decides whether to invoke `end_call` without a fixed phrase allowlist. The app speaks a localized goodbye, waits for Telnyx playback completion when available, then issues the hang-up command. The opening prompt is English/Hindi and asks the caller to speak their preferred language. Supported Sarvam voice locales are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia; response language and TTS voice are selected per caller turn, so the caller may switch languages during a call.
 
 ## 5. Mail endpoints
 
@@ -274,7 +274,7 @@ All mail routes require `X-Session-Token`. Mail sending also requires `user.pass
 
 Queue a new message to an existing active Syscall recipient. `to` must be a valid local address. The backend derives `from` from the authenticated user; the frontend must not send or allow editing a sender address.
 
-Request:
+Request for account or call-control actions:
 
 ```json
 {
@@ -475,11 +475,21 @@ Request:
 { "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "create_account" }
 ```
 
-`action` is `create_account` or `request_password_reset`; `actionId` is 12–80 characters. Account creation resolves the phone from the active call, is idempotent by call/action ID, creates an account only if absent, and queues a confirmation SMS for a newly created account. Reset action queues generic reset instructions. This is not an alternative public registration/reset endpoint. Inactive calls return `401`; an in-progress duplicate action may return `409`.
+`action` may be `create_account`, `request_password_reset`, `end_call`, `prepare_email`, `send_email`, or `discard_email`; `actionId` is 12–80 characters. Account creation resolves the phone from the active call, is idempotent by call/action ID, creates an account only if absent, and queues a confirmation SMS for a newly created account. Reset action queues generic reset instructions. `end_call` sends Telnyx's Call Control hang-up command; the voice agent exposes it to the conversational model only after asking whether more help is needed, and the model decides from the caller's natural-language answer whether it is a clear no (no fixed phrase allowlist). This is not an alternative public registration/reset endpoint. Inactive calls return `401`; an in-progress duplicate action may return `409`.
+
+Email action examples:
+
+```json
+{ "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "prepare_email", "recipientPhone": "9876543210", "subject": "Hello", "textBody": "A plain-text message" }
+{ "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "send_email", "draftId": "<prepared draft UUID>", "recipientPhone": "9876543210" }
+{ "callControlId": "<id>", "actionId": "<unique idempotency key>", "action": "discard_email", "draftId": "<prepared draft UUID>" }
+```
+
+`prepare_email` validates the sender against the active call's phone and requires the recipient to be an existing active account. `recipientPhone` is the recipient's ten-digit Indian phone number; the API derives `recipientAddress` by appending `LOCAL_MAIL_DOMAIN`. Subject and `textBody` are also required; subject is limited to 998 characters and the plain-text body to 12,000 characters. It stores one replaceable draft under that call ID in Redis for 15 minutes and returns `{ "action": "prepare_email", "status": "prepared", "draftId": "...", "recipientAddress": "...", "subject": "..." }`. It does not send mail. `send_email` requires the matching draft ID and queues the message through the existing email worker, returning `{ "action": "send_email", "status": "queued", "publicId": "...", "recipientAddress": "..." }`; a synchronous send failure returns `{ "action": "send_email", "status": "failed", "failureNotificationQueued": true|false }`. The voice agent invokes it only after the confirmation prompt and the conversational model interprets a clear affirmative. The `recipientPhone` is included so a confirmed attempt that fails before queueing can still be identified in the sender's SMS. After queue acceptance, the voice agent tells the caller the recipient should receive the email shortly. If the confirmed send fails before queueing or after SMTP retries are exhausted, Syscall queues an SMS to the sender naming the recipient number. Draft validation failures and cancellations do not send a failure SMS. `discard_email` removes the matching pending draft. Closing the call removes any pending draft. These actions are voice-agent-only; normal frontend mail must continue using the authenticated `/api/mail/send` route.
 
 #### `POST /internal/voice/sessions/close`
 
-Request: `{ "callControlId": "<id>" }`. Deletes API-side authorization for the active call. Returns `{ "status": "closed" }`.
+Request: `{ "callControlId": "<id>" }`. Deletes API-side authorization and any pending voice email draft for the active call. Returns `{ "status": "closed" }`.
 
 ### Voice-agent health and media WebSocket
 

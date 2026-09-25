@@ -118,7 +118,8 @@ const emailSchema = new Schema<EmailDocument>({
   textBody: { type: String, default: '' },
   htmlBody: { type: String, default: null },
   attachments: { type: [attachmentSchema], default: [] },
-  rawMimePath: { type: String, required: true },
+  // Outbound messages have no raw-MIME file until the SMTP service accepts them.
+  rawMimePath: { type: String, default: '' },
   messageIdHeader: { type: String, required: true },
   inReplyTo: { type: String, default: null },
   references: { type: [String], default: [] },
@@ -193,4 +194,3 @@ export async function pingDatabase(): Promise<boolean> {
     return false;
   }
 }
-

@@ -10,14 +10,16 @@ import { z } from 'zod';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import { AuditLog, Draft, Email, User, WebhookEvent, pingDatabase, type UserDocument } from '@syscall/db';
-import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue } from '@syscall/queues';
-import { startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
+import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue, queueEmailFailureSms } from '@syscall/queues';
+import { hangupCall, startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
 import { isTelnyxConfigured } from '@syscall/config';
-import { toPhoneE164, addressSchema, passwordSchema, phoneSchema } from '@syscall/validation';
+import { toLocalAddress, toPhoneE164, addressSchema, passwordSchema, phone10Schema, phoneSchema } from '@syscall/validation';
 import { scanWithClamAv } from '@syscall/mail';
 import type { AppConfig } from '@syscall/config';
 import { createLogger } from '@syscall/logging';
 import { audit, createSession, ensureUserForPhone, hashPassword, hashSecret, persistAttachments, purgeEmail, queueEmail, queueSms, requestOtp, requestPasswordReset, resolveSession, revokeAllSessions, revokeSession, verifyOtp, type ServiceContext } from './services.js';
+
+const voiceEmailDraftTtlSeconds = 15 * 60;
 
 // Builds the Fastify application with all shared dependencies explicitly provided.
 export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: FastifyInstance; context: ServiceContext }> {
@@ -47,6 +49,18 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     const user = await resolveSession(context, sessionToken);
     if (!user) throw httpError(401, 'Session is invalid or revoked.');
     return user;
+  }
+
+  // Queues one sender notice for a confirmed voice-email attempt that failed synchronously.
+  async function notifyFailedVoiceEmail(phoneE164: string, recipientPhone10: string, dedupeKey: string): Promise<boolean> {
+    try {
+      await queueEmailFailureSms(smsQueue, { phoneE164, recipientPhone10, dedupeKey });
+      logger.info('Queued sender SMS for failed confirmed voice email');
+      return true;
+    } catch (error) {
+      logger.error({ err: error }, 'Could not queue sender SMS for failed confirmed voice email');
+      return false;
+    }
   }
 
   // Returns common user-safe JSON without exposing password or internal identifiers.
@@ -163,10 +177,10 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     return { status: 'active' };
   });
 
-  // Executes only the two narrow actions available to a verified voice call.
+  // Executes narrow account, mail, and call-control actions for a verified voice call.
   app.post('/internal/voice/actions', async (request) => {
     requireVoiceAgent(request);
-    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['create_account', 'request_password_reset']) }).parse(request.body);
+    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['create_account', 'request_password_reset', 'end_call', 'prepare_email', 'send_email', 'discard_email']), recipientPhone: phone10Schema.optional(), subject: z.string().max(998).optional(), textBody: z.string().max(12000).optional(), draftId: z.string().uuid().optional() }).parse(request.body);
     const call = await redis.get(`voice:call:${body.callControlId}`);
     if (!call) throw httpError(401, 'Voice call is not active.');
     const { phoneE164 } = JSON.parse(call) as { phoneE164: string };
@@ -187,9 +201,58 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
           await queueSms(context, { phoneE164: created.user.phoneE164, body: `Your Syscall account ${created.user.emailAddress} has been created.` });
         }
         result = { action: body.action, created: created.created, emailAddress: created.user.emailAddress };
-      } else {
+      } else if (body.action === 'request_password_reset') {
         await requestPasswordReset(context, phoneE164);
         result = { action: body.action, accepted: true };
+      } else if (body.action === 'end_call') {
+        await hangupCall(config, body.callControlId);
+        logger.info('Telnyx accepted voice-agent hang-up command');
+        result = { action: body.action, accepted: true };
+      } else if (body.action === 'prepare_email') {
+        if (!body.recipientPhone || body.subject === undefined || !body.textBody?.trim()) throw httpError(400, 'A recipient phone number, subject, and message body are required.');
+        const recipientAddress = toLocalAddress(body.recipientPhone, config.LOCAL_MAIL_DOMAIN);
+        const sender = await User.findOne({ phoneE164, accountStatus: 'active' });
+        const recipient = await User.findOne({ emailAddress: recipientAddress, accountStatus: 'active' });
+        if (!sender) result = { action: body.action, status: 'sender_account_unavailable' };
+        else if (!recipient) result = { action: body.action, status: 'recipient_unavailable' };
+        else {
+          const draftId = crypto.randomUUID();
+          const pendingEmail = { draftId, to: recipientAddress, subject: body.subject, textBody: body.textBody.trim() };
+          await redis.set(`voice:pending-email:${body.callControlId}`, JSON.stringify(pendingEmail), 'EX', voiceEmailDraftTtlSeconds);
+          result = { action: body.action, status: 'prepared', draftId, recipientAddress, subject: body.subject };
+        }
+      } else if (body.action === 'send_email') {
+        if (!body.draftId) throw httpError(400, 'A prepared email draft is required.');
+        if (!body.recipientPhone) throw httpError(400, 'Recipient phone is required for a confirmed send attempt.');
+        let notificationRecipientPhone10 = phone10Schema.parse(body.recipientPhone);
+        try {
+          const pendingValue = await redis.get(`voice:pending-email:${body.callControlId}`);
+          const pendingEmail = pendingValue ? JSON.parse(pendingValue) as { draftId: string; to: string; subject: string; textBody: string } : null;
+          if (!pendingEmail || pendingEmail.draftId !== body.draftId) throw new Error('Confirmed email draft is unavailable.');
+          notificationRecipientPhone10 = phone10Schema.parse(pendingEmail.to.split('@')[0]);
+          if (notificationRecipientPhone10 !== body.recipientPhone) throw new Error('Confirmed email recipient did not match the prepared draft.');
+          const sender = await User.findOne({ phoneE164, accountStatus: 'active' });
+          if (!sender) throw new Error('Active sender account is unavailable.');
+          const publicId = await queueEmail(context, sender, pendingEmail.to, pendingEmail.subject, pendingEmail.textBody, null, [], {
+            phoneE164,
+            recipientPhone10: notificationRecipientPhone10,
+            dedupeKey: body.actionId,
+          });
+          try { await redis.del(`voice:pending-email:${body.callControlId}`); } catch (error) { logger.warn({ err: error }, 'Queued voice email but could not immediately clear its pending draft'); }
+          result = { action: body.action, status: 'queued', publicId, recipientAddress: pendingEmail.to };
+          logger.info({ emailId: publicId }, 'Confirmed voice email queued');
+        } catch (error) {
+          logger.error({ err: error }, 'Confirmed voice email failed before delivery queueing');
+          const failureNotificationQueued = await notifyFailedVoiceEmail(phoneE164, notificationRecipientPhone10, body.actionId);
+          result = { action: body.action, status: 'failed', failureNotificationQueued };
+        }
+      } else {
+        if (!body.draftId) throw httpError(400, 'A prepared email draft is required.');
+        const pendingKey = `voice:pending-email:${body.callControlId}`;
+        const pendingValue = await redis.get(pendingKey);
+        const pendingEmail = pendingValue ? JSON.parse(pendingValue) as { draftId: string } : null;
+        if (pendingEmail?.draftId === body.draftId) await redis.del(pendingKey);
+        result = { action: body.action, status: 'discarded' };
       }
       await redis.set(actionKey, JSON.stringify(result), 'EX', 3600);
       return result;
@@ -202,7 +265,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   app.post('/internal/voice/sessions/close', async (request) => {
     requireVoiceAgent(request);
     const body = z.object({ callControlId: z.string().min(10) }).parse(request.body);
-    await redis.del(`voice:call:${body.callControlId}`);
+    await redis.del(`voice:call:${body.callControlId}`, `voice:pending-email:${body.callControlId}`);
     return { status: 'closed' };
   });
 
@@ -245,7 +308,10 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     const rawBody = (request as RawBodyRequest).rawBody ?? JSON.stringify(request.body ?? {}); const signature = request.headers['telnyx-signature-ed25519']; const timestamp = request.headers['telnyx-timestamp']; const signatureValue = Array.isArray(signature) ? signature[0] : signature; const timestampValue = Array.isArray(timestamp) ? timestamp[0] : timestamp;
     if (!verifyWebhookSignature(config, rawBody, signatureValue, timestampValue)) throw httpError(401, 'Invalid Telnyx webhook signature.');
     const event = request.body as { data?: { id?: string; event_type?: string; payload?: Record<string, unknown> } }; const eventId = event.data?.id; if (!eventId) return { received: true };
-    try { await WebhookEvent.create({ providerEventId: eventId, eventType: event.data?.event_type ?? kind }); } catch (error) { if ((error as { code?: number }).code === 11000) return { received: true, duplicate: true }; throw error; }
+    const eventType = event.data?.event_type ?? kind;
+    try { await WebhookEvent.create({ providerEventId: eventId, eventType }); } catch (error) { if ((error as { code?: number }).code === 11000) return { received: true, duplicate: true }; throw error; }
+    if (eventType === 'call.hangup') logger.info({ eventId }, 'Telnyx confirmed voice call hang-up');
+    else logger.debug({ eventType, eventId }, 'Recorded Telnyx webhook event');
     return { received: true };
   }
 

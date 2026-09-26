@@ -214,10 +214,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
 
           {/* Telecom Number & Carrier Information */}
           <div style={styles.profileFieldGroup}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
-              <span style={styles.profileFieldLabel}>Mobile Carrier Number</span>
-              <span style={styles.metricStatus}>Telecom OTP-Linked</span>
-            </div>
+            <span style={styles.profileFieldLabel}>Mobile Carrier Number</span>
 
             <div style={styles.carrierInfoRow}>
               <span style={styles.carrierPhoneText}>
@@ -226,6 +223,13 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
 
               {carrierInfo.carrier && (
                 <div style={styles.carrierBadge}>
+                  {carrierInfo.brandLogo && (
+                    <img
+                      src={carrierInfo.brandLogo}
+                      alt={carrierInfo.carrier}
+                      style={styles.carrierLogoImg}
+                    />
+                  )}
                   <span style={styles.carrierNameText}>
                     {carrierInfo.carrier}
                   </span>
@@ -481,24 +485,25 @@ const styles: Record<string, React.CSSProperties> = {
   carrierBadge: {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '6px',
-    backgroundColor: '#EAF1FB',
-    border: '1px solid #C2E7FF',
-    padding: '3px 10px',
-    borderRadius: '12px',
+    gap: '7px',
+    backgroundColor: '#F0F4FC',
+    border: '1px solid #D3E3FD',
+    padding: '3px 10px 3px 6px',
+    borderRadius: '16px',
+  },
+  carrierLogoImg: {
+    width: '20px',
+    height: '20px',
+    borderRadius: '50%',
+    objectFit: 'contain',
+    backgroundColor: '#FFFFFF',
+    padding: '1px',
+    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.08)',
   },
   carrierNameText: {
-    fontSize: '12px',
+    fontSize: '12.5px',
     fontWeight: 600,
-    color: '#0B57D0',
-  },
-  metricStatus: {
-    fontSize: '11.5px',
-    color: '#0B57D0',
-    fontWeight: 600,
-    backgroundColor: '#EAF1FB',
-    padding: '2px 8px',
-    borderRadius: '8px',
+    color: '#041E49',
   },
   profileActionsRow: {
     display: 'flex',

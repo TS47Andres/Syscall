@@ -4,7 +4,15 @@
  * Service: Frontend.
  */
 import React, { useState, useRef } from 'react';
-import { IconCompose, IconClose, IconShieldCheck, IconSent } from './Icons';
+import {
+  IconCompose,
+  IconClose,
+  IconShieldCheck,
+  IconSent,
+  IconAttach,
+  IconScheduled,
+} from './Icons';
+import { ModernSchedulePicker } from './compose/ModernSchedulePicker';
 import { api } from '../api';
 import type { Attachment } from '../types';
 
@@ -32,6 +40,22 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
   const [sending, setSending] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
+  const [showSchedulePicker, setShowSchedulePicker] = useState<boolean>(Boolean(scheduledAt));
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(e.target.files ?? []);
+    if (selected.length > 0) {
+      setAttachments((prev) => [...prev, ...selected]);
+      setAttachmentsChanged(true);
+    }
+    if (e.target) e.target.value = '';
+  };
+
+  const removeAttachment = (indexToRemove: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== indexToRemove));
+    setAttachmentsChanged(true);
+  };
 
   // Floating window movable across entire page
   const [pos, setPos] = useState<{ x?: number; y?: number }>({});
@@ -252,10 +276,110 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
               />
             </div>
 
-            <label style={styles.attachmentLabel}>Attach files<input type="file" multiple onChange={(event) => { setAttachments(Array.from(event.target.files ?? [])); setAttachmentsChanged(true); }} /></label>
-            {!attachmentsChanged && initialAttachments.map((file, index) => <button key={`${file.filename}-${index}`} type="button" onClick={() => void handleDownloadDraftAttachment(index)} style={styles.attachmentDownload}>{file.filename} · {(file.sizeBytes / 1024).toFixed(1)} KB</button>)}
-            {(attachmentsChanged ? attachments.length : initialAttachments.length) > 0 && <span style={{ fontSize: 12, color: '#5E6674' }}>{attachmentsChanged ? attachments.length : initialAttachments.length} attachment(s){attachmentsChanged && initialAttachments.length ? ' (replaces saved files)' : ''}</span>}
-            {!replyToId && !draftId && <label style={styles.attachmentLabel}>Schedule delivery<input type="datetime-local" value={scheduledAt} min={new Date(Date.now() + 60000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)} onChange={(event) => setScheduledAt(event.target.value)} /></label>}
+            {/* Compose Toolbar: Attach Files & Schedule Send */}
+            <div style={styles.composeToolbarRow}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={handleFileChange}
+                  style={{ display: 'none' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="compose-attach-btn"
+                  title="Attach files from computer"
+                >
+                  <IconAttach size={16} color="#444746" />
+                  <span>Attach files</span>
+                </button>
+
+                {!replyToId && !draftId && (
+                  <button
+                    type="button"
+                    onClick={() => setShowSchedulePicker(!showSchedulePicker)}
+                    className="compose-attach-btn"
+                    style={
+                      scheduledAt || showSchedulePicker
+                        ? { backgroundColor: '#EAF1FB', borderColor: '#A8C7FA', color: '#0B57D0' }
+                        : {}
+                    }
+                    title="Schedule send for a specific date and time"
+                  >
+                    <IconScheduled
+                      size={16}
+                      color={scheduledAt || showSchedulePicker ? '#0B57D0' : '#444746'}
+                    />
+                    <span>{scheduledAt ? 'Scheduled' : 'Schedule send'}</span>
+                  </button>
+                )}
+              </div>
+
+              {(attachments.length > 0 || (!attachmentsChanged && initialAttachments.length > 0)) && (
+                <span style={{ fontSize: 11.5, color: '#5E6674', fontWeight: 500 }}>
+                  {attachmentsChanged ? attachments.length : initialAttachments.length} file(s)
+                </span>
+              )}
+            </div>
+
+            {/* Attachment Chips Display */}
+            {(attachments.length > 0 || (!attachmentsChanged && initialAttachments.length > 0)) && (
+              <div className="compose-files-grid">
+                {/* Draft saved files (if unchanged) */}
+                {!attachmentsChanged &&
+                  initialAttachments.map((file, index) => (
+                    <button
+                      key={`draft-file-${index}`}
+                      type="button"
+                      onClick={() => void handleDownloadDraftAttachment(index)}
+                      className="compose-draft-chip"
+                      title="Download saved draft attachment"
+                    >
+                      <IconAttach size={13} color="#0B57D0" />
+                      <span className="compose-file-chip-name">{file.filename}</span>
+                      <span className="compose-file-chip-size">
+                        {(file.sizeBytes / 1024).toFixed(1)} KB
+                      </span>
+                    </button>
+                  ))}
+
+                {/* Newly selected files */}
+                {attachments.map((file, index) => (
+                  <div key={`new-file-${index}`} className="compose-file-chip">
+                    <IconAttach size={13} color="#0B57D0" />
+                    <span className="compose-file-chip-name" title={file.name}>
+                      {file.name}
+                    </span>
+                    <span className="compose-file-chip-size">
+                      {(file.size / 1024).toFixed(1)} KB
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(index)}
+                      className="compose-file-chip-remove"
+                      title="Remove attachment"
+                    >
+                      <IconClose size={12} color="currentColor" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Modern Flatpickr Schedule Picker */}
+            {!replyToId && !draftId && (showSchedulePicker || scheduledAt) && (
+              <ModernSchedulePicker
+                scheduledAt={scheduledAt}
+                onScheduleChange={setScheduledAt}
+                onClear={() => {
+                  setScheduledAt('');
+                  setShowSchedulePicker(false);
+                }}
+                disabled={sending}
+              />
+            )}
 
             {/* Actions: Discard with Shield Tooltip next to it, and Send Syscall button */}
             <div style={styles.actionRow}>
@@ -263,7 +387,14 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
                 <button type="button" onClick={onClose} style={styles.cancelBtn}>
                   Discard
                 </button>
-                <button type="button" onClick={() => void handleSaveDraft()} style={styles.cancelBtn} disabled={sending}>Save draft</button>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveDraft()}
+                  style={styles.cancelBtn}
+                  disabled={sending}
+                >
+                  Save draft
+                </button>
                 <span
                   title="Protected by ClamAV real-time antivirus scan"
                   data-tooltip="Protected by ClamAV real-time antivirus scan"
@@ -274,8 +405,18 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
               </div>
 
               <button type="submit" disabled={sending} style={styles.sendBtn}>
-                <IconSent size={15} color="#FFFFFF" />
-                <span>{sending ? 'Queueing...' : scheduledAt ? 'Schedule Syscall' : 'Send Syscall'}</span>
+                {scheduledAt ? (
+                  <IconScheduled size={15} color="#FFFFFF" />
+                ) : (
+                  <IconSent size={15} color="#FFFFFF" />
+                )}
+                <span>
+                  {sending
+                    ? 'Queueing...'
+                    : scheduledAt
+                    ? 'Schedule Syscall'
+                    : 'Send Syscall'}
+                </span>
               </button>
             </div>
           </form>
@@ -459,20 +600,12 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: '6px',
   },
-  attachmentLabel: {
+  composeToolbarRow: {
     display: 'flex',
     alignItems: 'center',
-    gap: 10,
-    fontSize: 12,
-    color: '#444746',
-  },
-  attachmentDownload: {
-    padding: '4px 0',
-    border: 0,
-    background: 'transparent',
-    color: '#0B57D0',
-    fontSize: 12,
-    textAlign: 'left',
-    cursor: 'pointer',
+    justifyContent: 'space-between',
+    padding: '8px 0 4px 0',
+    borderTop: '1px solid #F1F3F4',
+    marginTop: '4px',
   },
 };

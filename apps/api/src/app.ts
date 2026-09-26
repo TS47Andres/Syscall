@@ -129,7 +129,52 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   app.post('/api/auth/otp/request', async (request, reply) => {
     const body = z.object({ phone: z.string() }).parse(request.body);
     await requestOtp(context, body.phone);
-    return reply.code(202).send({ status: 'queued' });
+    const phoneE164 = toPhoneE164(body.phone);
+    const existing = await User.findOne({ phoneE164, accountStatus: 'active' });
+    let avatarUrl: string | null = null;
+    if (existing?.avatarStorageKey) {
+      try {
+        const avatarPath = path.resolve(config.ATTACHMENT_STORAGE_PATH, existing.avatarStorageKey);
+        if (avatarPath.startsWith(`${path.resolve(config.ATTACHMENT_STORAGE_PATH)}${path.sep}`)) {
+          const bytes = await fs.readFile(avatarPath);
+          avatarUrl = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+        }
+      } catch {
+        // ignore avatar read failure
+      }
+    }
+    return reply.code(202).send({
+      status: 'queued',
+      user: existing
+        ? {
+            name: existing.displayName || '',
+            avatarUrl,
+          }
+        : null,
+    });
+  });
+
+  // Returns display name and avatar data URL for user preview on login screens
+  app.post('/api/auth/preview', async (request) => {
+    const body = z.object({ phone: z.string() }).parse(request.body);
+    const phoneE164 = toPhoneE164(body.phone);
+    const existing = await User.findOne({ phoneE164, accountStatus: 'active' });
+    let avatarUrl: string | null = null;
+    if (existing?.avatarStorageKey) {
+      try {
+        const avatarPath = path.resolve(config.ATTACHMENT_STORAGE_PATH, existing.avatarStorageKey);
+        if (avatarPath.startsWith(`${path.resolve(config.ATTACHMENT_STORAGE_PATH)}${path.sep}`)) {
+          const bytes = await fs.readFile(avatarPath);
+          avatarUrl = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return {
+      exists: Boolean(existing),
+      user: existing ? { name: existing.displayName || '', avatarUrl } : null,
+    };
   });
 
   // Starts a rate-limited account-setup call; account creation remains voice-confirmed.
@@ -172,8 +217,18 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
 
   app.post('/api/auth/otp/verify', async (request) => {
     const body = z.object({ phone: z.string(), otp: z.string().regex(/^\d{6}$/) }).parse(request.body);
-    const result = await verifyOtp(context, body.phone, body.otp);
-    return { sessionToken: result.sessionToken, requiresPassword: !result.user.passwordConfigured, user: publicUser(result.user) };
+    try {
+      const result = await verifyOtp(context, body.phone, body.otp);
+      return { sessionToken: result.sessionToken, requiresPassword: !result.user.passwordConfigured, user: publicUser(result.user) };
+    } catch (err: any) {
+      if (err?.message?.includes('Wrong OTP') || err?.message?.includes('invalid or expired')) {
+        throw httpError(400, 'Wrong OTP, try again.');
+      }
+      if (err?.message?.includes('Account does not exist')) {
+        throw httpError(404, 'Account does not exist.');
+      }
+      throw httpError(400, err?.message || 'Wrong OTP, try again.');
+    }
   });
 
   app.post('/api/auth/password/login', async (request) => {

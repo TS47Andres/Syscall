@@ -62,9 +62,14 @@ class SyscallApi {
     return result;
   }
 
-  // Requests a backend OTP for an existing account.
-  async requestOtp(phone: string): Promise<{ status: string; cooldownSeconds?: number }> {
+  // Requests a backend OTP for an existing account and retrieves public preview data if existing.
+  async requestOtp(phone: string): Promise<{ status: string; cooldownSeconds?: number; user?: { name: string; avatarUrl: string | null } | null }> {
     return this.request('/api/auth/otp/request', { method: 'POST', body: JSON.stringify({ phone }) });
+  }
+
+  // Previews an account's public name and avatar prior to sign in.
+  async previewPhone(phone: string): Promise<{ exists: boolean; user?: { name: string; avatarUrl: string | null } | null }> {
+    return this.request('/api/auth/preview', { method: 'POST', body: JSON.stringify({ phone }) });
   }
 
   // Verifies an existing-account OTP and stores the returned session token.

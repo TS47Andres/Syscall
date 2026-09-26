@@ -56,6 +56,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState<number>(0);
+  const [previewUser, setPreviewUser] = useState<{ name: string; avatarUrl: string | null } | null>(null);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -66,6 +67,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   }, [resendCooldown]);
 
   const raw10 = phoneInput.replace(/\D/g, '').slice(-10);
+
+  // Pre-fetch user preview when 10 digits are entered
+  useEffect(() => {
+    if (raw10.length === 10) {
+      void api.previewPhone(`+91${raw10}`).then((res) => {
+        if (res?.user) {
+          setPreviewUser(res.user);
+        }
+      }).catch(() => {});
+    }
+  }, [raw10]);
 
   // Switch modes
   const handleSwitchToCreate = () => {
@@ -149,6 +161,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setLoading(true);
     try {
       const result = await api.requestOtp(`+91${raw10}`);
+      if (result.user) {
+        setPreviewUser(result.user);
+        if (result.user.name) setFullName(result.user.name);
+      }
       setResendCooldown(result.cooldownSeconds ?? 60);
       setOtpDigits(['', '', '', '', '', '']);
       setResetAfterOtp(isPasswordReset);
@@ -187,7 +203,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           id: `user-${raw10}`,
           phone: raw10,
           emailAddress: `${raw10}@niti`,
-          name: fullName.trim() || 'Akshat Joshi',
+          name: previewUser?.name || fullName.trim() || 'Syscall User',
+          avatarUrl: previewUser?.avatarUrl || undefined,
           passwordConfigured: true,
           accountStatus: 'active',
         };
@@ -242,7 +259,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       if (res.user) {
         const user: User = {
           ...res.user,
-          name: fullName.trim() || res.user.name || 'Akshat Joshi',
+          name: res.user.name || previewUser?.name || fullName.trim() || 'Syscall User',
+          avatarUrl: res.user.avatarUrl || previewUser?.avatarUrl || undefined,
         };
         onSuccess(user);
       } else {
@@ -250,14 +268,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           id: `user-${raw10}`,
           phone: raw10,
           emailAddress: `${raw10}@niti`,
-          name: fullName.trim() || 'Akshat Joshi',
+          name: previewUser?.name || fullName.trim() || 'Syscall User',
+          avatarUrl: previewUser?.avatarUrl || undefined,
           passwordConfigured: true,
           accountStatus: 'active',
         };
         onSuccess(fallbackUser);
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Invalid or expired verification code');
+      const msg = (err.message || '').toLowerCase();
+      if (msg.includes('internal server error') || msg.includes('otp') || msg.includes('invalid') || msg.includes('wrong') || msg.includes('expired')) {
+        setErrorMessage('Wrong OTP, try again.');
+      } else {
+        setErrorMessage(err.message || 'Wrong OTP, try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -312,17 +336,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     <div style={styles.pageCanvas} className="auth-page-container">
       {/* Left 30% Panel: Holds the exact Sign In / Create Account Card */}
       <div style={styles.authLeftPanel} className="auth-left-panel">
+        {/* Top-Left Brand Header */}
+        <div style={styles.panelTopBrand}>
+          <SyscallLogo size={38} />
+          <span style={styles.panelTopBrandText}>Syscall</span>
+        </div>
+
         <div style={styles.authCardWrapper}>
           {/* Clean Google-Style Card */}
           <div style={styles.centeredCard} className="animate-fade-in">
-            {/* CENTERED HEADER */}
+            {/* CARD TITLE & SUBTITLE */}
             <div style={styles.centeredHeader}>
-              <div style={styles.logoWrap}>
-                <SyscallLogo size={44} />
-              </div>
-
-              <span style={styles.brandName}>Syscall</span>
-
               <h1 style={styles.googleTitle}>
                 {subStep === 'otp'
                   ? 'Verify your phone'
@@ -351,10 +375,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               {subStep === 'otp' && (
                 <div style={styles.accountIdentityPill}>
                   <div style={styles.accountPillAvatar}>
-                    {getInitials(fullName || 'Akshat Joshi')}
+                    {previewUser?.avatarUrl ? (
+                      <img
+                        src={previewUser.avatarUrl}
+                        alt="Avatar"
+                        style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      getInitials(previewUser?.name || fullName || 'User')
+                    )}
                   </div>
                   <span style={styles.accountPillText}>
-                    {fullName ? `${fullName} · ` : ''}+91 {raw10}
+                    {(previewUser?.name || fullName) ? `${previewUser?.name || fullName} · ` : ''}+91 {raw10}
                   </span>
                   <button
                     style={styles.accountChangeBtn}
@@ -387,7 +419,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       type="text"
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
-                      placeholder="e.g. Akshat Joshi"
+                      placeholder="e.g. Your Name"
                       style={{ ...styles.phoneInputField, paddingLeft: 14 }}
                       autoFocus
                     />
@@ -572,20 +604,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div style={styles.otpNoticeBox}>
-                      We will send a 6-digit verification code to{' '}
-                      <strong>+91 {raw10 || '...'}</strong>
-                    </div>
-                    <div>
-                      <button
-                        type="button"
-                        style={styles.usePasswordBtn}
-                        onClick={() => setSignInWithOtp(false)}
-                      >
-                        Use password instead
-                      </button>
-                    </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+                    <button
+                      type="button"
+                      style={styles.usePasswordBtn}
+                      onClick={() => setSignInWithOtp(false)}
+                    >
+                      Use password instead
+                    </button>
                   </div>
                 )}
 
@@ -791,18 +817,36 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: '460px',
     minHeight: '100vh',
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: '#FFFFFF',
     borderRight: '1px solid #E0E2EC',
     boxShadow: '4px 0 24px rgba(0, 0, 0, 0.04)',
     zIndex: 10,
-    padding: '32px 24px',
+    padding: '36px 36px 32px 36px',
     flexShrink: 0,
+    boxSizing: 'border-box',
+    position: 'relative',
+  },
+  panelTopBrand: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    alignSelf: 'flex-start',
+    width: '100%',
+    marginBottom: 'auto',
+  },
+  panelTopBrandText: {
+    fontFamily: 'var(--font-display)',
+    fontSize: '26px',
+    fontWeight: 700,
+    color: '#0B57D0',
+    letterSpacing: '-0.3px',
   },
   authCardWrapper: {
     width: '100%',
     maxWidth: '380px',
+    margin: 'auto 0',
   },
   centeredCard: {
     width: '100%',
@@ -816,20 +860,6 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     textAlign: 'center',
     marginBottom: '28px',
-  },
-  logoWrap: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: '8px',
-  },
-  brandName: {
-    fontFamily: 'var(--font-display)',
-    fontSize: '22px',
-    fontWeight: 700,
-    color: '#0B57D0',
-    letterSpacing: '-0.3px',
-    marginBottom: '12px',
   },
   googleTitle: {
     fontFamily: 'var(--font-display)',
@@ -988,17 +1018,16 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: '4px',
   },
   usePasswordBtn: {
-    padding: '6px 12px',
-    borderRadius: '6px',
-    backgroundColor: '#EAF1FB',
+    background: 'none',
+    border: 'none',
     color: '#0B57D0',
-    border: '1px solid #D3E3FD',
     fontWeight: 600,
-    fontSize: '12.5px',
+    fontSize: '13px',
     cursor: 'pointer',
+    padding: '4px 0',
     display: 'inline-flex',
     alignItems: 'center',
-    gap: '6px',
+    transition: 'color 0.15s ease',
   },
   otpNoticeBox: {
     padding: '10px 14px',

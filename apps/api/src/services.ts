@@ -108,13 +108,13 @@ export async function verifyOtp(context: ServiceContext, phone: string, otp: str
   const value = await context.redis.get(`otp:value:${phoneE164}`);
   const dailyKey = `otp:failed:${phoneE164}:${new Date().toISOString().slice(0, 10)}`;
   const failedAttempts = Number(await context.redis.get(dailyKey) ?? 0);
-  if (!value || failedAttempts >= context.config.OTP_MAX_FAILED_ATTEMPTS_PER_DAY) throw new Error('OTP is invalid or expired.');
+  if (!value || failedAttempts >= context.config.OTP_MAX_FAILED_ATTEMPTS_PER_DAY) throw new Error('Wrong OTP, try again.');
   const stored = JSON.parse(value) as { hash: string; expiresAt: number };
   if (stored.expiresAt < Date.now() || hashSecret(otp) !== stored.hash) {
     await context.redis.incr(dailyKey);
     await context.redis.expire(dailyKey, 24 * 60 * 60);
     await audit('otp_failed', null, [], { phone10Digit: toPhone10(phoneE164) });
-    throw new Error('OTP is invalid or expired.');
+    throw new Error('Wrong OTP, try again.');
   }
   const user = await User.findOne({ phoneE164 });
   if (!user) throw new Error('Account does not exist.');

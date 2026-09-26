@@ -504,18 +504,11 @@ input, textarea, select {
 }
 
 /* ==========================================================================
-   Draggable / Movable Compose FAB
+   Fixed Compose FAB
    ========================================================================== */
 .gmail-fab {
   user-select: none;
-  touch-action: none;
-  cursor: grab;
-}
-
-.gmail-fab.dragging {
-  cursor: grabbing !important;
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28) !important;
-  transform: scale(1.06) !important;
+  cursor: pointer;
 }
 
 /* ==========================================================================

@@ -40,7 +40,7 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <SyscallLogo size={28} />
             <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, color: '#1F1F1F' }}>
-              Syscall Mail
+              Syscall
             </span>
           </div>
           <button style={styles.closeBtn} onClick={onClose}>

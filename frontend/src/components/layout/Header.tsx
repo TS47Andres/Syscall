@@ -73,7 +73,6 @@ export const Header: React.FC<HeaderProps> = ({
         <div style={styles.brandTitleWrap}>
           <SyscallLogo size={32} />
           <span style={styles.brandTitleText}>Syscall</span>
-          <span style={styles.brandSubtitle}>Mail</span>
         </div>
       </div>
 
@@ -185,11 +184,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#1F1F1F',
     letterSpacing: '-0.3px',
   },
-  brandSubtitle: {
-    fontSize: '18px',
-    color: '#444746',
-    fontWeight: 400,
-  },
   searchBar: {
     flex: 1,
     maxWidth: '720px',
@@ -285,7 +279,8 @@ const styles: Record<string, React.CSSProperties> = {
     userSelect: 'none',
     flexShrink: 0,
     overflow: 'hidden',
-    border: '2px solid transparent',
+    border: 'none',
+    outline: 'none',
   },
   avatarImg: {
     width: '100%',

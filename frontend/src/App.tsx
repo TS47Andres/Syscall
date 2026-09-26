@@ -12,10 +12,13 @@ import { MailLayout } from './layouts/MailLayout';
 import { MailPage } from './pages/MailPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { MailProvider } from './context/MailContext';
+import { LoginSplashScreen } from './components/auth/LoginSplashScreen';
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [showSplash, setShowSplash] = useState<boolean>(false);
+  const [pendingUser, setPendingUser] = useState<User | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +36,15 @@ export function App() {
   }, []);
 
   const handleAuthSuccess = (authenticatedUser: User) => {
-    setUser(authenticatedUser);
+    setPendingUser(authenticatedUser);
+    setShowSplash(true);
+  };
+
+  const handleSplashFinish = () => {
+    if (pendingUser) {
+      setUser(pendingUser);
+    }
+    setShowSplash(false);
   };
 
   const handleSignOut = () => {
@@ -52,7 +63,9 @@ export function App() {
   }
 
   return (
-    <BrowserRouter>
+    <>
+      {showSplash && <LoginSplashScreen onFinish={handleSplashFinish} />}
+      <BrowserRouter>
       <Routes>
         {/* Auth routes */}
         <Route
@@ -107,6 +120,7 @@ export function App() {
         />
       </Routes>
     </BrowserRouter>
+    </>
   );
 }
 

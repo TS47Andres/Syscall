@@ -567,44 +567,385 @@ input, textarea, select {
 }
 
 /* ==========================================================================
-   Flatpickr Custom Calendar Theme (Google / Syscall Material)
+   Flatpickr Modern Material 3 / Google Workspace Theme
    ========================================================================== */
-.flatpickr-input.form-control {
-  width: 100%;
-  height: 38px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid #DADCE0;
-  background-color: #FFFFFF;
-  font-family: inherit;
-  font-size: 13px;
-  color: #1F1F1F;
-  font-weight: 500;
-  outline: none;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.flatpickr-input.form-control:focus,
-.flatpickr-input.form-control:hover {
-  border-color: #0B57D0;
-  box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.12);
-}
-
 .flatpickr-calendar {
-  border-radius: 12px !important;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.06) !important;
-  border: none !important;
-  font-family: inherit !important;
-  overflow: hidden;
+  width: 320px !important;
+  background: #FFFFFF !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+  font-family: var(--font-body) !important;
+  padding: 14px 14px 12px 14px !important;
+  overflow: hidden !important;
   z-index: 999999 !important;
+  color: #1F1F1F !important;
+  animation: none !important;
+}
+
+.flatpickr-calendar.arrowTop:before,
+.flatpickr-calendar.arrowTop:after {
+  border-bottom-color: #FFFFFF !important;
+}
+
+.flatpickr-calendar.arrowBottom:before,
+.flatpickr-calendar.arrowBottom:after {
+  border-top-color: #FFFFFF !important;
+}
+
+.flatpickr-months {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  height: 38px !important;
+  padding: 0 4px 6px 4px !important;
+  border-bottom: 1px solid #F1F3F4 !important;
+}
+
+.flatpickr-prev-month,
+.flatpickr-next-month {
+  position: static !important;
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 50% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: #444746 !important;
+  fill: #444746 !important;
+  padding: 0 !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.flatpickr-prev-month:hover,
+.flatpickr-next-month:hover {
+  background-color: #F2F6FC !important;
+  color: #0B57D0 !important;
+  fill: #0B57D0 !important;
+}
+
+.flatpickr-prev-month svg,
+.flatpickr-next-month svg {
+  width: 12px !important;
+  height: 12px !important;
+  fill: currentColor !important;
+}
+
+.flatpickr-current-month {
+  position: static !important;
+  width: auto !important;
+  font-family: var(--font-display) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: #1F1F1F !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  padding: 0 !important;
+}
+
+.flatpickr-monthDropdown-months {
+  font-family: var(--font-display) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: #1F1F1F !important;
+  background: transparent !important;
+  border: none !important;
+  cursor: pointer !important;
+  padding: 2px 4px !important;
+  outline: none !important;
+}
+
+.flatpickr-current-month .numInputWrapper input.cur-year {
+  font-family: var(--font-display) !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: #1F1F1F !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 2px 4px !important;
+  outline: none !important;
+}
+
+.flatpickr-current-month .numInputWrapper span {
+  display: none !important;
+}
+
+.flatpickr-weekdays {
+  height: 28px !important;
+  padding-top: 6px !important;
+  padding-bottom: 4px !important;
+}
+
+.flatpickr-weekday {
+  font-family: var(--font-body) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #747775 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+}
+
+.dayContainer {
+  width: 290px !important;
+  min-width: 290px !important;
+  max-width: 290px !important;
+}
+
+.flatpickr-day {
+  font-family: var(--font-body) !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  color: #1F1F1F !important;
+  border-radius: 50% !important;
+  height: 38px !important;
+  width: 38px !important;
+  max-width: 38px !important;
+  line-height: 38px !important;
+  border: none !important;
+  margin: 1px auto !important;
+  transition: all 0.12s ease !important;
+}
+
+.flatpickr-day:hover {
+  background: #EAF1FB !important;
+  color: #0B57D0 !important;
+}
+
+.flatpickr-day.today {
+  color: #0B57D0 !important;
+  font-weight: 700 !important;
+  box-shadow: inset 0 0 0 1.5px #0B57D0 !important;
+  background: transparent !important;
+}
+
+.flatpickr-day.today:hover {
+  background: #EAF1FB !important;
 }
 
 .flatpickr-day.selected,
 .flatpickr-day.startRange,
 .flatpickr-day.endRange {
   background: #0B57D0 !important;
+  color: #FFFFFF !important;
+  font-weight: 600 !important;
+  box-shadow: 0 3px 8px rgba(11, 87, 208, 0.35) !important;
   border-color: #0B57D0 !important;
+}
+
+.flatpickr-day.prevMonthDay,
+.flatpickr-day.nextMonthDay {
+  color: #C4C7C5 !important;
+  background: transparent !important;
+  cursor: default !important;
+}
+
+.flatpickr-day.flatpickr-disabled,
+.flatpickr-day.flatpickr-disabled:hover {
+  color: #E0E2EC !important;
+  cursor: not-allowed !important;
+}
+
+.flatpickr-time {
+  border-top: 1px solid #F1F3F4 !important;
+  margin-top: 8px !important;
+  padding-top: 10px !important;
+  padding-bottom: 2px !important;
+  height: auto !important;
+  line-height: 1 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+
+.flatpickr-time .numInputWrapper {
+  width: 44px !important;
+  height: 34px !important;
+}
+
+.flatpickr-time input {
+  font-family: var(--font-mono) !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #041E49 !important;
+  background-color: #F8FAFD !important;
+  border: 1px solid #D3E3FD !important;
+  border-radius: 8px !important;
+  height: 34px !important;
+  padding: 0 !important;
+  text-align: center !important;
+  outline: none !important;
+  transition: all 0.15s ease !important;
+}
+
+.flatpickr-time input:focus,
+.flatpickr-time input:hover {
+  border-color: #0B57D0 !important;
+  background-color: #FFFFFF !important;
+  box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.15) !important;
+}
+
+.flatpickr-time-separator {
+  font-family: var(--font-mono) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  color: #444746 !important;
+  height: auto !important;
+  line-height: 34px !important;
+}
+
+.flatpickr-am-pm {
+  font-family: var(--font-body) !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  color: #0B57D0 !important;
+  background-color: #EAF1FB !important;
+  border: 1px solid #C2E7FF !important;
+  border-radius: 8px !important;
+  height: 34px !important;
+  padding: 0 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  transition: all 0.15s ease !important;
+}
+
+.flatpickr-am-pm:hover {
+  background-color: #D3E3FD !important;
+  border-color: #0B57D0 !important;
+}
+
+/* ==========================================================================
+   Compose Schedule Bar Component
+   ========================================================================== */
+.compose-schedule-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background-color: #F8FAFD;
+  border: 1px solid #D3E3FD;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+
+.compose-schedule-bar:hover {
+  background-color: #F0F4FC;
+  border-color: #B5D2FD;
+  box-shadow: 0 1px 4px rgba(11, 87, 208, 0.08);
+}
+
+.compose-schedule-bar.is-scheduled {
+  background-color: #EDF4FE;
+  border-color: #A8C7FA;
+}
+
+.compose-schedule-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.compose-schedule-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background-color: #EAF1FB;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.compose-schedule-bar:hover .compose-schedule-badge {
+  transform: scale(1.04);
+}
+
+.compose-schedule-bar.is-scheduled .compose-schedule-badge {
+  background-color: #D3E3FD;
+}
+
+.compose-schedule-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.compose-schedule-label {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #0B57D0;
+  line-height: 1.2;
+}
+
+.compose-schedule-input-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.compose-schedule-base-input {
+  display: none;
+}
+
+.compose-schedule-alt-input {
+  font-family: var(--font-body) !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  color: #041E49 !important;
+  background: transparent !important;
+  border: none !important;
+  outline: none !important;
+  cursor: pointer !important;
+  padding: 0 !important;
+  width: 100% !important;
+  line-height: 1.3 !important;
+}
+
+.compose-schedule-alt-input::placeholder {
+  color: #5E6674 !important;
+  font-weight: 500 !important;
+}
+
+.compose-schedule-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 14px;
+  border: 1px solid #DADCE0;
+  background-color: #FFFFFF;
+  color: #444746;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.compose-schedule-cancel-btn:hover {
+  background-color: #FEECEB;
+  border-color: #F87171;
+  color: #B91C1C;
 }
 
 /* ==========================================================================

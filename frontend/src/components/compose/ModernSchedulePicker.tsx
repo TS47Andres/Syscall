@@ -3,17 +3,17 @@
  * Role: Modern date & time picker for scheduling email delivery using flatpickr (MIT).
  * Service: Frontend.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import flatpickr from 'flatpickr';
 import type { Instance as FlatpickrInstance } from 'flatpickr/dist/types/instance';
 import 'flatpickr/dist/flatpickr.min.css';
-import 'flatpickr/dist/themes/material_blue.css';
 import { IconScheduled, IconClose } from '../Icons';
 
 interface ModernSchedulePickerProps {
   scheduledAt: string;
   onScheduleChange: (iso: string) => void;
   onClear: () => void;
+  autoOpen?: boolean;
   disabled?: boolean;
 }
 
@@ -21,11 +21,11 @@ export const ModernSchedulePicker: React.FC<ModernSchedulePickerProps> = ({
   scheduledAt,
   onScheduleChange,
   onClear,
+  autoOpen = false,
   disabled = false,
 }) => {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fpRef = useRef<FlatpickrInstance | null>(null);
-  const [showPresets, setShowPresets] = useState<boolean>(false);
 
   useEffect(() => {
     if (!inputRef.current) return;
@@ -37,10 +37,13 @@ export const ModernSchedulePicker: React.FC<ModernSchedulePickerProps> = ({
       enableTime: true,
       dateFormat: 'Y-m-d H:i',
       altInput: true,
-      altFormat: 'M j, Y - h:i K',
+      altFormat: 'D, M j, Y \\a\\t h:i K',
+      altInputClass: 'compose-schedule-alt-input',
       minDate: minDateTime,
       time_24hr: false,
       minuteIncrement: 5,
+      position: 'auto',
+      disableMobile: true,
       defaultDate: scheduledAt ? new Date(scheduledAt) : undefined,
       onChange: (selectedDates) => {
         if (selectedDates && selectedDates.length > 0) {
@@ -50,6 +53,18 @@ export const ModernSchedulePicker: React.FC<ModernSchedulePickerProps> = ({
     });
 
     fpRef.current = fp;
+
+    // Auto-open calendar if requested and no date set yet
+    if (autoOpen && !scheduledAt) {
+      const openTimer = setTimeout(() => {
+        fp.open();
+      }, 60);
+      return () => {
+        clearTimeout(openTimer);
+        fp.destroy();
+        fpRef.current = null;
+      };
+    }
 
     return () => {
       fp.destroy();
@@ -68,184 +83,51 @@ export const ModernSchedulePicker: React.FC<ModernSchedulePickerProps> = ({
     }
   }, [scheduledAt]);
 
-  const setPreset = (calcDate: () => Date) => {
-    const target = calcDate();
-    if (fpRef.current) {
-      fpRef.current.setDate(target, true);
+  const handleBarClick = () => {
+    if (!disabled && fpRef.current) {
+      fpRef.current.open();
     }
-    onScheduleChange(target.toISOString());
-    setShowPresets(false);
-  };
-
-  const getTomorrow9AM = () => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    d.setHours(9, 0, 0, 0);
-    return d;
-  };
-
-  const getTomorrow2PM = () => {
-    const d = new Date();
-    d.setDate(d.getDate() + 1);
-    d.setHours(14, 0, 0, 0);
-    return d;
-  };
-
-  const getNextMonday9AM = () => {
-    const d = new Date();
-    const day = d.getDay();
-    const diff = (8 - day) % 7 || 7;
-    d.setDate(d.getDate() + diff);
-    d.setHours(9, 0, 0, 0);
-    return d;
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.headerRow}>
-        <div style={styles.labelGroup}>
+    <div
+      className={`compose-schedule-bar ${scheduledAt ? 'is-scheduled' : ''}`}
+      onClick={handleBarClick}
+      title="Click to select or modify delivery date & time"
+    >
+      <div className="compose-schedule-left">
+        <div className="compose-schedule-badge">
           <IconScheduled size={16} color="#0B57D0" />
-          <span style={styles.labelTitle}>Schedule Delivery</span>
         </div>
-
-        <button
-          type="button"
-          style={styles.presetsToggleBtn}
-          onClick={() => setShowPresets(!showPresets)}
-        >
-          {showPresets ? 'Hide presets' : 'Quick times'}
-        </button>
+        <div className="compose-schedule-meta">
+          <span className="compose-schedule-label">
+            {scheduledAt ? 'Send scheduled for' : 'Choose delivery date & time'}
+          </span>
+          <div className="compose-schedule-input-container">
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Click to choose date and time..."
+              disabled={disabled}
+              className="compose-schedule-base-input"
+            />
+          </div>
+        </div>
       </div>
 
-      {showPresets && (
-        <div style={styles.presetsContainer}>
-          <button
-            type="button"
-            style={styles.presetChip}
-            onClick={() => setPreset(getTomorrow9AM)}
-          >
-            Tomorrow 9:00 AM
-          </button>
-          <button
-            type="button"
-            style={styles.presetChip}
-            onClick={() => setPreset(getTomorrow2PM)}
-          >
-            Tomorrow 2:00 PM
-          </button>
-          <button
-            type="button"
-            style={styles.presetChip}
-            onClick={() => setPreset(getNextMonday9AM)}
-          >
-            Monday 9:00 AM
-          </button>
-        </div>
-      )}
-
-      <div style={styles.inputWrapper}>
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="Click to pick date & time..."
-          disabled={disabled}
-          style={styles.hiddenInput}
-        />
-
-        {scheduledAt && (
-          <button
-            type="button"
-            style={styles.clearBtn}
-            onClick={onClear}
-            title="Cancel scheduling"
-          >
-            <IconClose size={14} color="#5E5E5E" />
-            <span>Cancel schedule</span>
-          </button>
-        )}
-      </div>
+      <button
+        type="button"
+        className="compose-schedule-cancel-btn"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClear();
+        }}
+        title="Cancel scheduling"
+        disabled={disabled}
+      >
+        <IconClose size={13} color="#444746" />
+        <span>Cancel</span>
+      </button>
     </div>
   );
-};
-
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    padding: '10px 14px',
-    backgroundColor: '#F8FAFD',
-    borderRadius: '10px',
-    border: '1px solid #D3E3FD',
-    marginTop: '6px',
-    marginBottom: '6px',
-  },
-  headerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  labelGroup: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '6px',
-  },
-  labelTitle: {
-    fontSize: '12.5px',
-    fontWeight: 600,
-    color: '#041E49',
-    letterSpacing: '-0.1px',
-  },
-  presetsToggleBtn: {
-    background: 'none',
-    border: 'none',
-    color: '#0B57D0',
-    fontSize: '11.5px',
-    fontWeight: 600,
-    cursor: 'pointer',
-    padding: '2px 6px',
-    borderRadius: '4px',
-  },
-  presetsContainer: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: '6px',
-    paddingTop: '2px',
-  },
-  presetChip: {
-    fontSize: '11.5px',
-    fontWeight: 500,
-    backgroundColor: '#FFFFFF',
-    color: '#0B57D0',
-    border: '1px solid #C2E7FF',
-    borderRadius: '14px',
-    padding: '4px 10px',
-    cursor: 'pointer',
-    transition: 'all 0.15s ease',
-  },
-  inputWrapper: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    position: 'relative',
-    width: '100%',
-  },
-  hiddenInput: {
-    width: '100%',
-  },
-  clearBtn: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    background: '#FFFFFF',
-    border: '1px solid #DADCE0',
-    borderRadius: '16px',
-    padding: '4px 10px',
-    fontSize: '11.5px',
-    fontWeight: 500,
-    color: '#444746',
-    cursor: 'pointer',
-    flexShrink: 0,
-    transition: 'background-color 0.15s ease',
-  },
 };

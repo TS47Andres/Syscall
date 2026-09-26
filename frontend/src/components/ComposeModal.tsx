@@ -377,6 +377,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
                   setScheduledAt('');
                   setShowSchedulePicker(false);
                 }}
+                autoOpen={!scheduledAt}
                 disabled={sending}
               />
             )}

@@ -957,6 +957,28 @@ input, textarea, select {
   -ms-user-select: none !important;
 }
 
+.flatpickr-calendar ::selection,
+.flatpickr-calendar *::selection,
+.flatpickr-calendar input::selection,
+.flatpickr-time input::selection,
+.flatpickr-time input.flatpickr-hour::selection,
+.flatpickr-time input.flatpickr-minute::selection {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: inherit !important;
+}
+
+.flatpickr-calendar ::-moz-selection,
+.flatpickr-calendar *::-moz-selection,
+.flatpickr-calendar input::-moz-selection,
+.flatpickr-time input::-moz-selection,
+.flatpickr-time input.flatpickr-hour::-moz-selection,
+.flatpickr-time input.flatpickr-minute::-moz-selection {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: inherit !important;
+}
+
 .flatpickr-calendar {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.14), 0 2px 10px rgba(0, 0, 0, 0.08) !important;
   border: 1px solid #E0E2EC !important;
@@ -1014,6 +1036,7 @@ input, textarea, select {
   text-align: center !important;
   box-sizing: border-box !important;
   transition: all 0.15s ease !important;
+  caret-color: transparent !important;
 }
 
 .flatpickr-time input.flatpickr-hour:hover,

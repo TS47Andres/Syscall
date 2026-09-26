@@ -71,6 +71,25 @@ export const ModernSchedulePicker: React.FC<ModernSchedulePickerProps> = ({
       timeContainer.appendChild(tickBtn);
     };
 
+    const preventInputSelection = (instance: FlatpickrInstance) => {
+      if (!instance.calendarContainer) return;
+      const inputs = instance.calendarContainer.querySelectorAll<HTMLInputElement>('.flatpickr-time input');
+      inputs.forEach((input) => {
+        const deselect = () => {
+          try {
+            input.setSelectionRange(input.value.length, input.value.length);
+          } catch {}
+        };
+        input.addEventListener('select', (e) => {
+          e.preventDefault();
+          deselect();
+        });
+        input.addEventListener('focus', () => setTimeout(deselect, 0));
+        input.addEventListener('click', deselect);
+        input.addEventListener('mouseup', deselect);
+      });
+    };
+
     const fp = flatpickr(inputRef.current, {
       enableTime: true,
       dateFormat: 'Y-m-d H:i',
@@ -85,9 +104,11 @@ export const ModernSchedulePicker: React.FC<ModernSchedulePickerProps> = ({
       defaultDate: scheduledAt ? new Date(scheduledAt) : undefined,
       onReady: (_dates, _str, instance) => {
         ensureTickButton(instance);
+        preventInputSelection(instance);
       },
       onOpen: (_dates, _str, instance) => {
         ensureTickButton(instance);
+        preventInputSelection(instance);
       },
       onChange: (selectedDates) => {
         if (selectedDates && selectedDates.length > 0) {

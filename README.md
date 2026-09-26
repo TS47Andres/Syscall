@@ -1,99 +1,260 @@
 # Syscall
 
-Syscall is a containerized backend for phone-addressed mail identities. Indian phone numbers map to local-only addresses such as `9876543210@niti`.
+<p align="center">
+  <strong>Mail built around your mobile number.</strong><br />
+  A private, phone-addressed email service with a browser inbox and a conversational voice assistant.
+</p>
 
-## Architecture
+<p align="center">
+  <a href="https://github.com/TS47Andres/Syscall"><img src="https://img.shields.io/badge/Project-Syscall-0B57D0?style=for-the-badge" alt="Syscall project" /></a>
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-Vite-61DAFB?style=for-the-badge&logo=react&logoColor=20232A" alt="React and Vite" />
+  <img src="https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker Compose" />
+  <img src="https://img.shields.io/badge/Email-ClamAV%20scanned-2E8B57?style=for-the-badge" alt="ClamAV attachment scanning" />
+</p>
 
-- `api` owns Fastify routes, authentication, mail orchestration, outbound-call setup, and signed Telnyx webhooks.
-- `frontend` serves the React browser application in its own Nginx container and proxies browser API requests to `api` on the Compose network.
-- `voice-agent` owns live call audio, language selection, conversation state, and narrowly scoped account, mail, and call-control actions. It uses Sarvam realtime speech recognition, chat completions, and speech synthesis for a conversational call flow.
-- `smtp` validates local identities, parses MIME, scans attachments with ClamAV, and stores accepted mail.
-- `worker` handles queued mail delivery, unread notifications, and Telnyx SMS.
-- MongoDB stores domain records; Redis stores sessions, queues, and short-lived voice-call authorization.
-- Tailscale Funnel optionally publishes only the Telnyx webhook and `/voice-stream` paths. Databases, Redis, SMTP, ClamAV, and the rest of the API stay private.
+<p align="center">
+  <img src="frontend/src/assets/showcase/Emailing.png" alt="Syscall inbox and phone-linked email" width="900" />
+</p>
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for data models, contracts, and call flow.
-Frontend implementers and coding agents should use [FRONTEND_AGENT_SPEC.md](FRONTEND_AGENT_SPEC.md) for the detailed HTTP, auth, mail, draft, and voice integration contract.
+Syscall gives each active account a local mail address derived from its verified Indian mobile number, such as `9876543210@niti`. It combines a React mail client with an API, internal SMTP delivery, background workers, and an optional Telnyx voice assistant.
 
-## Local setup
+> **Status:** Self-hosted development project. Telnyx and Sarvam powered features need provider credentials and webhook setup before they can be used. See [setup](#quick-start) and [provider setup](#provider-setup).
+
+## Contents
+
+- [Highlights](#highlights)
+- [Feature gallery](#feature-gallery)
+- [How it fits together](#how-it-fits-together)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Provider setup](#provider-setup)
+- [Development](#development)
+- [Health checks and logs](#health-checks-and-logs)
+- [API examples](#api-examples)
+- [Security and current scope](#security-and-current-scope)
+- [Repository map](#repository-map)
+- [More documentation](#more-documentation)
+
+## Highlights
+
+- **Phone-addressed accounts:** a caller confirms their name over an onboarding call, and the account is created by the IVR flow.
+- **OTP and password access:** sign in with a password or a one-time code. New users can verify their mobile number and set an initial password from the sign in page.
+- **Mail essentials:** inbox, sent, all mail, categories, stars, spam, trash, replies, drafts, and attachments.
+- **Write with Sarvam:** describe a new email or ask for edits. The Sarvam 105B model receives the current subject and message as context and returns an updated subject and complete message body.
+- **Send later:** schedule delivery, then review, reschedule, or cancel messages while they are still pending.
+- **Attachment scanning:** the internal SMTP service checks incoming attachments with ClamAV before accepting a message.
+- **Voice assistant:** an optional multilingual assistant handles account setup and supported mail actions over Telnyx calls, with Sarvam speech services.
+- **Self-hosted services:** Docker Compose runs the app and its data services together, with databases and SMTP kept off the public interface.
+
+## Feature gallery
+
+These are the feature images displayed in the sign in page carousel.
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="frontend/src/assets/showcase/Emailing.png" alt="Syscall email inbox" width="100%" /><br />
+      <strong>Phone-linked email</strong><br />
+      Send and receive mail using local addresses derived from mobile numbers.
+    </td>
+    <td align="center" width="50%">
+      <img src="frontend/src/assets/showcase/Schedule_Emails.png" alt="Syscall scheduled email compose" width="100%" /><br />
+      <strong>Scheduled delivery</strong><br />
+      Pick a future date and time, then manage pending messages from Scheduled.
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="frontend/src/assets/showcase/Manage_Profile.png" alt="Syscall profile management" width="100%" /><br />
+      <strong>Profile management</strong><br />
+      Manage your display name, profile image, and account settings.
+    </td>
+    <td align="center" width="50%">
+      <img src="frontend/src/assets/showcase/ClamAV_Virus_Protection.png" alt="Syscall attachment scanning" width="100%" /><br />
+      <strong>Attachment scanning</strong><br />
+      ClamAV scans attached files as mail enters the internal mail service.
+    </td>
+  </tr>
+</table>
+
+## How it fits together
+
+```mermaid
+flowchart LR
+  Browser[Browser: React app] -->|same-origin UI and API| Web[Nginx frontend]
+  Web -->|/api and /calls| API[Fastify API]
+  API --> Mongo[(MongoDB)]
+  API --> Redis[(Redis and BullMQ)]
+  API -->|email prompt with draft context| Sarvam[Sarvam AI]
+  API -->|voice and SMS actions| Telnyx[Telnyx]
+  Redis --> Worker[Background worker]
+  Worker -->|deliver mail| SMTP[Internal SMTP service]
+  SMTP --> ClamAV[ClamAV scanner]
+  SMTP --> Mongo
+  SMTP --> Files[(Mail storage volume)]
+  Telnyx -->|webhooks| API
+  Telnyx <-->|voice media WebSocket| Voice[Optional voice agent]
+  Voice -->|speech, language, and conversation| Sarvam
+  Voice -->|authenticated call actions| API
+```
+
+The frontend container serves the built single-page app and proxies API requests to the API container. The API owns authentication, account and mail rules, provider webhooks, and queue creation. The worker performs asynchronous mail delivery and notifications. SMTP parses and validates mail, scans attachments, and stores accepted messages. MongoDB is the durable record; Redis backs sessions, queues, and short-lived voice call state.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for service responsibilities, request flows, persistence, and security boundaries.
+
+## Quick start
+
+### Requirements
+
+- Docker Desktop with Docker Compose v2
+- Git
+- Node.js 22 or newer for local development outside Docker
+
+### Start the core stack
 
 ```powershell
 Copy-Item .env.example .env
-# Configure required local services and provider credentials in .env.
 docker compose up -d --build
 ```
 
-The core stack starts MongoDB, Redis, ClamAV, API, SMTP, and worker. The voice agent is opt-in:
+The frontend is available at [http://localhost:8080](http://localhost:8080). Change `FRONTEND_PORT` in `.env` if that port is already in use.
+
+The default profile starts MongoDB, Redis, ClamAV, the API, internal SMTP, the mail worker, and the browser frontend. The voice agent is optional:
 
 ```powershell
 docker compose --profile voice up -d --build
 ```
 
-The browser application is a separate container in the default stack at `http://localhost:8080` (override with `FRONTEND_PORT`). It serves the built single-page app and proxies `/api`, `/calls`, `/ready`, and `/health` to the API, so browser traffic uses one origin without enabling permissive API CORS. For frontend-only development, use `npm --prefix frontend ci` followed by `npm --prefix frontend run dev`; Vite proxies those same API paths to `http://localhost:3000`.
+Core services can start with provider settings left blank, but phone calls, SMS, email-writing assistance, and voice AI need the corresponding configuration. See [Provider setup](#provider-setup). Do not put real credentials in source control.
 
-Set `SARVAM_API_KEY` and a random `VOICE_AGENT_API_TOKEN` in `.env` before starting the voice profile. The same internal token must be present for the API and agent. `.env.example` lists the supported settings and contains no credentials.
+### Stop the stack
 
-## Language behavior
+```powershell
+docker compose down
+```
 
-Browser signup uses a “Request a call” flow. The caller enters their name and phone number; the voice agent reads back and confirms the name, then asks whether it should create the account. The API rejects account creation unless those two confirmations occur in order. Ordinary calls do not expose the account-creation tool.
+To remove the local MongoDB and Redis data as well as mail files, run `docker compose down -v`. This deletes the named volumes and their data.
 
-The browser application uses backend state only: session tokens are tab-scoped in `sessionStorage`; profile, mail, drafts, scheduled mail, stars, spam flags, trash, and attachments are loaded or mutated through authenticated API routes. Replies use server-derived addresses and thread headers. There are no demo accounts, seeded messages, fallback OTPs, local mailbox persistence, or fake call controls. See [FRONTEND_AGENT_SPEC.md](FRONTEND_AGENT_SPEC.md) for the API contract.
+## Configuration
 
-The opening prompt is bilingual English/Hindi and asks the caller to describe what they need in their preferred language. Sarvam realtime STT detects the language independently for every caller turn, and the agent selects that turn's Sarvam Bulbul v3 voice; callers can switch languages during a call. Recognized script in the transcript can resolve a conflicting or uncertain language label, and a previous turn's language is only a fallback when the current turn is ambiguous. Supported output languages are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia. For an unknown/unsupported language, the caller is asked conversationally to retry. Calls are natural conversations: there is no keypad menu or DTMF action flow.
+Start from [.env.example](.env.example). Docker Compose provides internal host names for MongoDB, Redis, SMTP, and ClamAV; the sample file is configured for those names.
 
-During a browser-requested setup call, the voice agent confirms the caller's name, then asks for explicit account-creation consent; ordinary calls cannot create accounts. The agent can also compose a plain-text email to an existing active Syscall account: the caller gives only the recipient's 10-digit phone number, and the backend adds the configured local mail domain. It gathers the recipient, subject, and full message across turns, reads back the destination and summary, then sends only after an unambiguous spoken confirmation. For future delivery, it understands relative times such as “after 5 minutes”, “in 1 hour”, or “after 2 days” (exactly 48 hours), as well as a specific India-local date/time. It gets the current backend time and `Asia/Kolkata` timezone on every caller turn, reads back the resolved time in IST, and schedules only after confirmation. Callers can list, cancel, or reschedule pending scheduled emails; cancellation/rescheduling is allowed only before delivery begins. Password-reset requests return the generic account-safe result. If intent is genuinely ambiguous, the assistant asks a short clarifying question.
+| Setting | Purpose |
+| --- | --- |
+| `API_PORT` | Host port for the API; default `3000`. |
+| `FRONTEND_PORT` | Host port for the browser app; default `8080`. |
+| `LOCAL_MAIL_DOMAIN` | Local address suffix; default `niti`. |
+| `MONGODB_URI`, `REDIS_URL` | MongoDB and Redis connection strings. |
+| `TELNYX_API_KEY`, `TELNYX_PUBLIC_KEY` | Telnyx API access and webhook signature verification. |
+| `TELNYX_PHONE_NUMBER`, `TELNYX_CONNECTION_ID` | Outbound voice calling configuration. |
+| `TELNYX_MESSAGING_PROFILE_ID`, `TELNYX_MESSAGING_SENDER_ID` | SMS sending configuration. |
+| `PUBLIC_WEBHOOK_BASE_URL` | Public HTTPS base URL Telnyx can reach. |
+| `SARVAM_API_KEY` | Sarvam email writing and optional voice assistant AI. |
+| `VOICE_AGENT_API_TOKEN` | Shared secret between the API and optional voice agent. |
+| `MAX_ATTACHMENT_SIZE_MB` | Maximum accepted attachment size; default `10`. |
+| `ATTACHMENT_STORAGE_PATH`, `RAW_MAIL_STORAGE_PATH` | Paths on the shared mail-storage volume. |
 
-After completing a request, the assistant asks whether any other help is needed in the current language. If the caller's contextual response is a clear decline, Sarvam decides whether to invoke the `end_call` tool; there is no fixed phrase allowlist. The app speaks a localized goodbye, waits for Telnyx playback completion when available, then issues the hang-up command.
+Authentication expiry and OTP limits, SMTP limits, and ClamAV settings are also configurable in `.env.example`.
 
-## Tailscale Funnel
+## Provider setup
 
-Install Tailscale for Windows, sign in, and enable HTTPS certificates and Funnel for your tailnet. Set `API_PORT` and `VOICE_AGENT_PORT` only if using non-default local ports. Start the API and voice profile, then run:
+### Telnyx calls and SMS
+
+1. Create/configure a Telnyx Voice API application, outbound connection, and assigned phone number.
+2. Create/configure a Messaging Profile and assign its sender number.
+3. Fill in the Telnyx API key, public key, connection ID, messaging profile ID, and sender settings in `.env`.
+4. Make the Telnyx webhook endpoints reachable over HTTPS and set `PUBLIC_WEBHOOK_BASE_URL`.
+5. Start the `voice` profile for the media-stream assistant and configure Telnyx with the webhook endpoints below.
+
+```text
+https://<public-host>/webhooks/telnyx/voice
+https://<public-host>/webhooks/telnyx/sms
+```
+
+### Sarvam AI
+
+Set `SARVAM_API_KEY` for the compose email writer. The browser sends its instruction plus the current subject and body to the authenticated API route, and the API calls the Sarvam 105B chat-completions endpoint. The same key is used by the optional voice agent for its speech and conversation features.
+
+### Optional Tailscale Funnel
+
+For a local development setup, the repository includes a Windows helper for publishing only the Telnyx webhook and voice stream paths through Tailscale Funnel:
 
 ```powershell
 npm run tailscale:funnel
+npm run tailscale:funnel:status
+npm run tailscale:funnel:reset
 ```
 
-The helper checks both health endpoints and publishes only `/webhooks/telnyx/` to the API and `/voice-stream` to the voice agent. Both Docker host ports bind to loopback. Copy the `https://<machine>.<tailnet>.ts.net` hostname shown by Tailscale into `.env` as `PUBLIC_WEBHOOK_BASE_URL`, then restart the stack and configure Telnyx with:
+Install and sign in to Tailscale first. The helper checks the API and voice-agent health endpoints and binds host ports to loopback. After enabling Funnel, use its HTTPS hostname as `PUBLIC_WEBHOOK_BASE_URL`, restart the services, and use that hostname in the Telnyx webhook URLs. See [ARCHITECTURE.md](ARCHITECTURE.md#network-boundaries) for the exposed paths and private services.
 
-```text
-https://<machine>.<tailnet>.ts.net/webhooks/telnyx/voice
-https://<machine>.<tailnet>.ts.net/webhooks/telnyx/sms
-```
+## Development
 
-The agent's call-media URL is generated from the same base URL. Use `npm run tailscale:funnel:status` to inspect Funnel routes and `npm run tailscale:funnel:reset` to remove them. Funnel activation changes public network state; run the helper only when ready to publish these paths. Telnyx webhook signature verification remains mandatory.
-
-## Telnyx setup
-
-Run `npm run telnyx:config` for the webhook URLs. Configure a Voice API application with the voice webhook, API v2, outbound connection, and assigned number. Configure a Messaging Profile with the SMS webhook and assigned number. Populate Telnyx credentials, IDs, sender configuration, and `PUBLIC_WEBHOOK_BASE_URL` in `.env`. Missing provider settings fail explicitly; they are not replaced with fake values.
-
-## Health and logs
+Install the monorepo dependencies from the root:
 
 ```powershell
-curl http://localhost:3000/health
-curl http://localhost:3000/ready
-curl http://localhost:8080/healthz
-npm run status
-docker compose logs -f api worker smtp
-docker compose logs -f frontend
+npm ci
+```
+
+Run the frontend in Vite's development server while the API and infrastructure are running:
+
+```powershell
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+Vite serves the app on its configured development port and proxies `/api`, `/calls`, `/ready`, and `/health` to `http://localhost:3000`.
+
+Useful root scripts:
+
+| Command | Purpose |
+| --- | --- |
+| `npm run api` | Run the API with `tsx`. |
+| `npm run smtp` | Run the internal SMTP service. |
+| `npm run worker` | Run the background worker. |
+| `npm run voice-agent` | Run the voice agent. |
+| `npm run typecheck` | Type-check the TypeScript workspaces. |
+| `npm test` | Run the Vitest suite. |
+| `npm run status` | Print local service status. |
+| `npm run telnyx:config` | Print the Telnyx webhook configuration. |
+
+The frontend also has `npm --prefix frontend run build` for a production build.
+
+## Health checks and logs
+
+| URL | Checks |
+| --- | --- |
+| `http://localhost:8080/healthz` | Frontend container health. |
+| `http://localhost:8080/health` or `http://localhost:3000/health` | API liveness. |
+| `http://localhost:8080/ready` or `http://localhost:3000/ready` | API readiness and dependencies. |
+| `http://localhost:4000/health` | Voice agent health when its profile is running. |
+
+Tail logs with:
+
+```powershell
+docker compose logs -f frontend api worker smtp
 docker compose --profile voice logs -f voice-agent
 ```
 
 ## API examples
 
-Request and verify OTP for an existing account (replace `<sms-code>` with the code received on the handset):
+Request an OTP for an existing account. The code is delivered by SMS when Telnyx is configured:
 
 ```powershell
-curl -X POST http://localhost:3000/api/auth/otp/request -H 'content-type: application/json' -d '{"phone":"+919876543210"}'
-curl -X POST http://localhost:3000/api/auth/otp/verify -H 'content-type: application/json' -d '{"phone":"+919876543210","otp":"<sms-code>"}'
+curl -X POST http://localhost:3000/api/auth/otp/request `
+  -H 'content-type: application/json' `
+  -d '{"phone":"+919876543210"}'
 ```
 
-Start an outbound conversational assistant call:
+Start a general outbound call:
 
 ```powershell
-curl -X POST http://localhost:3000/calls/start -H 'content-type: application/json' -d '{"phone":"+919876543210"}'
+curl -X POST http://localhost:3000/calls/start `
+  -H 'content-type: application/json' `
+  -d '{"phone":"+919876543210"}'
 ```
 
-The voice assistant can send an email now or schedule a complete message for later delivery. Schedule a message through the authenticated API with an explicit timezone offset:
+Create a scheduled email with a session token and an explicit India Standard Time offset:
 
 ```powershell
 curl -X POST http://localhost:3000/api/mail/scheduled `
@@ -102,17 +263,40 @@ curl -X POST http://localhost:3000/api/mail/scheduled `
   -d '{"to":"9300640012@niti","subject":"Happy Birthday","textBody":"Wishing you a wonderful day!","scheduledAt":"2026-10-01T09:00:00+05:30"}'
 ```
 
-The API accepts schedules from 1 minute to 365 days ahead. Use `GET /api/mail/scheduled` to list pending schedules, `PATCH /api/mail/scheduled/<publicId>` with a new `scheduledAt` to reschedule, or `DELETE /api/mail/scheduled/<publicId>` to cancel. Scheduled messages remain hidden from the recipient until delivery starts. The worker recovers delayed jobs from MongoDB if queue state is missing. If a voice-scheduled email eventually fails after its SMTP retries, the sender receives an SMS naming the recipient number; merely creating or cancelling a schedule does not send a failure notice. After asking whether more help is needed, the conversational model decides whether a clear natural-language no should end the call; no fixed decline phrase list is used.
+Schedules can be listed at `GET /api/mail/scheduled`, moved with `PATCH /api/mail/scheduled/<publicId>`, and cancelled with `DELETE /api/mail/scheduled/<publicId>` while still pending. The allowed delivery window is 1 minute to 365 days ahead.
 
-For internal SMTP evaluation, connect from another container to `smtp:2525`; do not expose it publicly. Mail is scanned by ClamAV before acceptance.
+## Security and current scope
 
-## Stop and reset
+- Session tokens are opaque and stored in browser `sessionStorage`; the server backs sessions with Redis.
+- Passwords are hashed with Argon2id. OTP and reset tokens are stored as hashes and expire.
+- Telnyx webhooks are signature-verified and provider event IDs are deduplicated.
+- The voice agent's internal API calls require `VOICE_AGENT_API_TOKEN`; setup-call tickets are short-lived and single-use.
+- SMTP is internal to the Compose network. ClamAV is required before attachments are accepted.
+- Tailscale Funnel is optional. When used, it publishes only the required Telnyx webhook and voice-stream routes; MongoDB, Redis, SMTP, ClamAV, and the rest of the API remain private.
+- Mail addresses use the configured local domain. Public MX/DNS, external recipients, groups, and aliases are outside current scope.
+- Browser and voice signup use provider-backed calls/SMS. Configure rate limits and review provider exposure before making an instance public.
 
-```powershell
-docker compose down
-docker compose down -v  # Destructively removes MongoDB, Redis, and mail-storage volumes.
-```
+## Repository map
 
-## Current limits
+| Path | Responsibility |
+| --- | --- |
+| `frontend/` | React/Vite browser app, auth flow, mailbox, profile, compose UI. |
+| `apps/api/` | Fastify API, authentication, mail orchestration, AI compose route, provider webhooks. |
+| `apps/voice-agent/` | Telnyx media stream and Sarvam-powered call assistant. |
+| `apps/smtp/` | Internal SMTP ingress, MIME parsing, attachment scanning, message storage. |
+| `apps/worker/` | BullMQ delivery, delayed schedules, and SMS notification jobs. |
+| `packages/` | Shared config, database models, domain validation, queues, mail helpers, and Telnyx integration. |
+| `docker/` | Container build files and Nginx/ClamAV configuration. |
+| `scripts/` | Local status, Telnyx configuration, and Tailscale helpers. |
+| `ARCHITECTURE.md` | Detailed service boundaries, data flows, and operational design. |
 
-Aliases, groups, external mail, and public MX/DNS are outside the current implementation. Spam classification is recipient-controlled. Password reset can be completed in the frontend using an SMS OTP or a valid one-time reset link. Signup calls are rate-limited per destination phone and still need stronger abuse controls before unattended public production use.
+## More documentation
+
+- [Architecture and data flows](ARCHITECTURE.md)
+- [Frontend integration contract](FRONTEND_AGENT_SPEC.md)
+- [Environment template](.env.example)
+- [Frontend development notes](frontend/README.md)
+
+<p align="center">
+  <sub>Topics: phone-based email · self-hosted mail · React · TypeScript · Fastify · MongoDB · Redis · Docker Compose · Telnyx · Sarvam AI · ClamAV</sub>
+</p>

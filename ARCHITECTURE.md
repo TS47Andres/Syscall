@@ -1,93 +1,181 @@
 # Syscall architecture
 
-## Summary
+## System overview
 
-Syscall is a containerized, single-recipient/single-sender phone-addressed mail system. The API owns synchronous HTTP workflows and domain orchestration; SMTP owns protocol handling and security gates; the worker owns durable asynchronous delivery and delayed unread notifications. MongoDB is the source of truth for users, mail, drafts, audit records, and webhook idempotency. Redis stores sessions, BullMQ state, and short-lived voice-call authorization. Raw MIME and generated attachment files live on the shared mail-storage volume. Optional Tailscale Funnel ingress publishes only Telnyx webhook paths and the voice media WebSocket path.
+Syscall is a self-hosted mail application in which an active user's Indian mobile number maps to an address on a local mail domain, for example `9876543210@niti`. The browser application handles mailbox, profile, authentication, and compose interactions. The Fastify API is the authority for sessions, user and mail state, provider integrations, and queue creation. A separate SMTP service validates and scans mail, while a BullMQ worker performs delivery and notifications. An optional voice agent connects Telnyx call audio to Sarvam speech and conversation services.
 
-## Service boundaries
+MongoDB holds durable account and mail records, including one-time password-reset tokens. Redis holds sessions, BullMQ state, OTP verification state, and short-lived voice call authorization and drafts. Raw MIME and attachment files are stored on a shared Docker volume.
 
-```text
-frontend/      React/Vite browser application, built and served by Nginx
-apps/api/       Fastify HTTP API, auth, mail, calls, Telnyx webhooks
-apps/voice-agent/ Telnyx media WebSocket, Sarvam speech/chat, call-scoped actions
-apps/smtp/      SMTP listener, MIME parsing, ClamAV scanning, message storage
-apps/worker/    BullMQ consumers for immediate/delayed mail delivery and SMS notifications
-packages/config Shared typed environment validation
-packages/db     Mongoose connection and models
-packages/domain Phone, address, auth, and mail rules
-packages/logging Structured logging helpers
-packages/mail   MIME, attachment, raw-file, and ClamAV helpers
-packages/queues BullMQ queue names and connection factory
-packages/telnyx Telnyx Voice/Messaging client and webhook verification
-docker/         Service Dockerfiles and ClamAV configuration
-scripts/        Local evaluation and status helpers
-storage/        Local development mount points
+## Component topology
+
+```mermaid
+flowchart LR
+  subgraph Client[Client]
+    Browser[React and Vite SPA]
+  end
+  subgraph Compose[Docker Compose network]
+    Nginx[Nginx frontend]
+    API[Fastify API]
+    Mongo[(MongoDB)]
+    Redis[(Redis and BullMQ)]
+    Worker[Mail and SMS worker]
+    SMTP[Internal SMTP service]
+    AV[ClamAV]
+    Store[(Shared mail-storage volume)]
+    Voice[Optional voice agent]
+  end
+  Telnyx[Telnyx Voice and Messaging]
+  Sarvam[Sarvam AI]
+  Browser --> Nginx
+  Nginx -->|/api, /calls, health| API
+  API --> Mongo
+  API --> Redis
+  API -->|authenticated email generation| Sarvam
+  API -->|outbound calls and SMS| Telnyx
+  Telnyx -->|signed voice and SMS webhooks| API
+  Telnyx <-->|bidirectional media WebSocket| Voice
+  Voice -->|private actions| API
+  Voice <-->|STT, chat, TTS| Sarvam
+  Redis --> Worker
+  Worker --> SMTP
+  SMTP --> AV
+  SMTP --> Mongo
+  SMTP --> Store
 ```
 
-## MongoDB schemas
+## Service responsibilities
 
-- `users`: public UUIDv7, normalized phone fields, derived address, display name, optional generated avatar key, Argon2id password hash, password state, account state, login/revocation timestamps.
-- `sessions`: Redis keys contain hashed opaque session tokens and user/revocation metadata.
-- `otps`: phone-scoped hashed OTP, expiry, resend timestamp, failure count, and consumed timestamp.
-- `password_reset_tokens`: hashed single-use token, expiry, consumed timestamp, and user reference.
-- `emails`: public UUIDv7, sender/recipient references and addresses, parsed content and RFC thread headers, attachment metadata, raw MIME path, delivery/read/spam, participant-scoped star/trash/permanent-delete state, schedule time/version/source, and timestamps.
-- `drafts`: public UUIDv7, owner, recipient, content, attachment metadata, draft state, and timestamps.
-- `audit_logs`: public UUIDv7, event type, optional actor and related IDs, timestamp, and non-sensitive metadata.
-- `webhook_events`: provider/event ID unique index and processing timestamp for idempotency.
+| Component | Responsibility |
+| --- | --- |
+| `frontend/` | React/Vite single-page app: signup and sign in, mailbox, compose, scheduling, profile, and session-aware routing. |
+| `docker/frontend` | Builds the frontend and serves it with Nginx. Nginx proxies same-origin `/api/`, `/calls/`, `/ready`, and `/health` paths to the API. `/healthz` is a frontend-only check. |
+| `apps/api/` | Fastify routes for auth, onboarding, profile, mail, drafts, Sarvam compose requests, call creation, Telnyx webhooks, and private voice-agent actions. It applies domain rules and enqueues asynchronous work. |
+| `apps/voice-agent/` | Validates call-stream tickets, processes the Telnyx media WebSocket, manages turn state, and invokes narrowly scoped API actions. Sarvam provides realtime speech recognition, language detection, chat, and synthesis. |
+| `apps/smtp/` | Internal SMTP ingress. It validates local sender and recipient addresses, parses MIME, enforces attachment limits, scans attachments with ClamAV, and records accepted mail. |
+| `apps/worker/` | Processes queued and delayed email jobs, recovers schedules from MongoDB, retries SMTP delivery, and sends configured SMS notifications. |
+| MongoDB | Durable users, email, draft, audit, and webhook-event records. |
+| Redis | Opaque session state, BullMQ jobs, OTP verification state, and expiring call-scoped authorization and composition state. |
+| ClamAV | Scans SMTP attachments. Accepted attachments require a successful scanner response. |
+| Shared mail-storage volume | Raw `.eml` files and generated attachment files, shared between API, SMTP, and worker containers as needed. |
+| `packages/` | Shared typed configuration, Mongoose models, validation/domain rules, queue helpers, logging, MIME/storage/scanning helpers, and Telnyx integration. |
 
-Indexes cover phone/address uniqueness, email public IDs, inbox queries, draft ownership, token expiry lookups, audit timestamps, and webhook event IDs.
+The default Compose profile includes MongoDB, Redis, ClamAV, API, frontend, SMTP, and worker. `voice-agent` is opt-in through the `voice` profile.
 
-## API contract
+## Browser and API boundary
 
-The `frontend` Compose service serves the compiled SPA independently on host port 8080 by default. Nginx proxies `/api/`, `/calls/`, `/ready`, and `/health` to the API container, keeping browser calls same-origin without changing the API's CORS policy. Vite uses an equivalent localhost API proxy for development. Set `FRONTEND_PORT` to override the published browser port.
+The browser is served from one origin. In Compose, Nginx proxies `/api/` and `/calls/` to `api:3000`, and proxies `/health` and `/ready` to the corresponding API checks. Vite configures matching development proxies to `localhost:3000`. This keeps browser traffic same-origin and does not require permissive API CORS settings.
 
-Auth routes issue opaque Redis-backed sessions through `X-Session-Token`. OTP request/verify, password login/set, logout/logout-all, forgot/reset password, and session inspection are under `/api/auth`. `POST /api/onboarding/call-request` starts rate-limited browser signup and carries short-lived caller-name context into the voice session. Mail routes send or reply with RFC thread headers, create/list/reschedule/cancel scheduled messages, list/open/trash/restore/permanently delete messages, download authorized attachments, and toggle participant-scoped stars and recipient spam. Draft routes provide attachment-aware CRUD and send. Profile routes read and update display name and generated JPEG avatar. `/calls/start` remains the general outbound call endpoint. Telnyx voice and SMS webhooks are under `/webhooks/telnyx`. Private API routes under `/internal/voice` require the shared `VOICE_AGENT_API_TOKEN` and accept one-time session activation, call-scoped actions, current-time context, and session closure. `/health` reports liveness; `/ready` checks API dependencies.
+Authenticated API requests use the `X-Session-Token` header. The frontend keeps the opaque token in tab-scoped `sessionStorage` and calls `/api/auth/me` during startup to restore a session. Cached profile data is not treated as proof of authentication.
 
-## Conversational call sequence
+### Route groups
 
-1. `POST /api/onboarding/call-request` rate-limits by destination number, rejects existing active accounts, stores a short-lived random stream ticket and requested display name in Redis, then asks Telnyx to call the normalized Indian number. General calls use `/calls/start` and do not receive account-creation tools. The ticket is included only in the media-stream URL; Redis stores its hash and call context.
-2. Tailscale Funnel routes `/voice-stream` to the loopback-bound voice-agent container and `/webhooks/telnyx/` to the API. The agent validates the ticket before accepting the WebSocket upgrade.
-3. Telnyx starts a bidirectional 8 kHz mono PCMU stream. The agent checks the call-control ID, called number, and codec, then consumes the one-time ticket through an authenticated API call.
-4. The agent opens Sarvam realtime STT with automatic language detection and plays a bilingual English/Hindi welcome prompt. For each caller turn, it selects a supported voice from that turn's detected locale and transcript script; confident language changes take effect immediately. A previous turn's voice is only a fallback for an ambiguous turn, not a call-wide lock.
-5. On account-setup calls, the assistant reads back the supplied name and waits for the caller to confirm or correct it. After name confirmation, it asks whether to create the account. The API changes call state to allow account creation only after the question has actually been spoken, and only exposes `create_account` for the caller's next clear affirmative answer. Ordinary calls cannot use this tool. Password-reset requests send generic SMS instructions. For email, the agent gathers the recipient's ten-digit phone number, subject, and complete plain-text body across turns; the API appends `LOCAL_MAIL_DOMAIN` and validates the active Syscall account. For immediate delivery, it stages or revises the draft, reads back its destination and summary, then exposes send only after an affirmative answer to the just-spoken confirmation. For scheduled delivery, it also resolves a relative delay or India-local date/time, reads back the exact IST time, and only creates the schedule after caller confirmation. The voice-agent fetches current backend time and timezone context on each caller turn. The API anchors relative delays to its own clock. It also exposes tools to list, cancel, and reschedule pending voice schedules. An immediate confirmed send reports that it was queued; a scheduled send reports its scheduled time, never that it has already been delivered. A final failure SMS is queued only after a voice scheduled email's SMTP attempt starts and exhausts retries. Once a request is completed, the assistant asks whether more help is needed in the current language.
-6. After that check-in, the voice-agent exposes `end_call` to Sarvam. The model interprets the caller's natural-language reply and decides whether it is a clear no; there is no local fixed phrase list. If selected, the agent speaks a localized goodbye, waits for Telnyx's playback mark when available, then invokes the API's authenticated hang-up action. Telnyx's `call.hangup` webhook is logged as the provider confirmation. The API resolves the active call-control ID rather than trusting model-provided identity.
-7. Sarvam TTS returns 8 kHz mu-law audio, which the agent packetizes into 20 ms Telnyx media frames. Sarvam VAD speech-start interrupts active synthesis, clears Telnyx's queued audio, and aborts an in-flight chat request. The finalized caller transcript is added to conversation history. Callers request account actions conversationally; there is no keypad menu or DTMF action handler.
-8. When the Telnyx stream closes, the agent stops recognition/synthesis and removes the API-side call authorization.
+| Route group | Purpose |
+| --- | --- |
+| `/api/auth/*` | OTP issue/verification, password login and setup, session inspection/revocation, forgot-password and reset. |
+| `/api/onboarding/call-request` | Starts the IVR account onboarding call with a short-lived name and stream ticket. |
+| `/api/ai/compose` | Authenticated Sarvam 105B email creation or revision. |
+| `/api/mail/*` | Mailbox listing/details, send/reply, schedule management, attachments, stars, spam, trash, restore, and delete. |
+| `/api/drafts/*` | Attachment-aware draft create, read, update, delete, and send operations. |
+| `/api/profile` | Read and update the account display name and avatar. |
+| `/calls/start` | Starts a general outbound call without account-creation authority. |
+| `/webhooks/telnyx/*` | Telnyx voice and SMS event callbacks. Provider signatures are verified and event IDs deduplicated. |
+| `/internal/voice/*` | Private, token-protected call activation, call-scoped actions, time context, and cleanup for the voice agent. |
+| `/health`, `/ready` | API liveness and dependency readiness. |
 
-## Password reset
+## Account creation and authentication
 
-1. API or agent supplies the normalized phone number.
-2. The service looks up the account, creates a random token, stores only its hash and configured expiry, and enqueues an SMS with a reset URL. The response does not reveal whether an account exists.
-3. `/api/auth/reset-password` validates a submitted token, sets an Argon2id password, consumes outstanding reset tokens, revokes sessions, and audits completion.
+### IVR account creation
 
-The frontend offers OTP-based password recovery and accepts an existing one-time reset token on `/reset-password`; the API remains authoritative for token consumption and password policy.
+1. The create-account form collects a name and Indian mobile number, then calls `POST /api/onboarding/call-request`.
+2. The API normalizes the number, rate-limits setup calls, rejects an existing active account, and stores a short-lived hashed stream ticket with the requested name in Redis.
+3. Telnyx places the call and opens a media stream to the voice agent. The agent validates and consumes the one-time ticket through the authenticated internal API.
+4. The assistant reads the name back and requires caller confirmation. It then asks for explicit permission to create the account. The API only exposes the account-creation action at the appropriate state in this call.
+5. After the account has been created through the call, the user can choose **New User? Set Password** on the sign in page. The flow verifies the mobile number by SMS OTP and sets the account's initial password.
 
-## OTP login
+Ordinary outbound calls do not receive account-creation tools. The caller-name confirmation and explicit consent checks are enforced server-side as well as in the conversational flow.
 
-1. Request validates phone and cooldown/rate limits, hashes a six-digit OTP, and sends it through the SMS queue.
-2. Verify compares the hash, enforces expiry and daily failure limits, creates a Redis session, and records first-login password setup state.
-3. Password set validates policy, hashes with Argon2id, and clears the setup requirement.
+### OTP, password, and sessions
 
-## Sending and receiving mail
+OTP requests enforce cooldown and failure limits. The service stores a hash of each short-lived code and sends it through the SMS queue. Successful verification creates an opaque Redis-backed session. New accounts set their initial password after verification; existing users can sign in by password or OTP. Passwords use Argon2id. Forgot-password responses are generic to avoid revealing whether a phone number belongs to an account, and reset credentials are single-use and expire.
 
-1. An authenticated API request derives `From` from the session user and validates the recipient.
-2. MongoDB stores an email with `queued` status before a BullMQ job is created.
-3. The worker builds MIME and sends it to the internal SMTP service through Nodemailer.
-4. SMTP validates identities, parses and scans attachments, stores accepted mail, and updates delivery state.
-5. A delayed unread job re-reads the email and queues an SMS only if it is still unread.
+## Sarvam email writing
 
-Scheduled email creation accepts a complete message directly through `POST /api/mail/scheduled`; it does not require a draft. MongoDB stores status `scheduled`, a UTC `scheduledAt`, and a monotonically increasing `scheduleVersion`. BullMQ holds a delayed job keyed by email ID and version. The worker atomically transitions only the matching due version from `scheduled` to `queued` before using the existing SMTP retry path. The periodic worker recovery pass reconciles MongoDB scheduled records with missing, failed, or completed queue jobs, so a Redis job loss does not silently drop the schedule. Rescheduling enqueues a new version before updating MongoDB, then invalidates the previous job; cancellation atomically changes status and increments the version before best-effort queue removal. These version checks make a stale or racing delayed job a no-op. Schedule times are constrained to 1 minute through 365 days ahead. The recipient-facing list/detail routes hide `scheduled` and `cancelled` messages; the sender can list their pending schedules and change/cancel only while status remains `scheduled`.
+The compose panel places a single-line prompt between the subject and message body. It supports both first drafts and edits to the current draft.
 
-Voice email uses the same queue and delivery path, without attachments. The private API resolves the sender from the active call's bound phone number and requires that account to be active; it also requires the recipient to be an existing active Syscall account. Immediate-send drafts remain in Redis under the call ID for up to 15 minutes and are removed after send, discard, or call close. For schedules, the complete message and resolved future time are staged under that call-scoped key, then the confirmed internal action persists the complete email and delayed job. Relative phrases such as “after 2 days” mean exactly 48 hours. Absolute date/time strings include the `+05:30` offset. Time context comes from an authenticated internal API route; backend time is authoritative. `scheduledByVoice` allows the worker to queue the sender's technical-failure SMS only after a scheduled SMTP attempt starts and ultimately fails, not when the schedule is created or cancelled.
+1. The authenticated frontend sends the user's instruction, current subject, and current text body to `POST /api/ai/compose`.
+2. The API validates input size, checks for `SARVAM_API_KEY`, and sends the prompt and current draft context to Sarvam's `sarvam-105b` chat-completions endpoint.
+3. The API requires a JSON response with non-empty `subject` and `textBody` strings and validates their maximum lengths.
+4. The frontend replaces both compose fields with the result. The user can edit the result before sending or saving the draft.
 
-## Security and operational choices
+The compose API does not deliver mail or persist a draft; normal compose, draft, and send routes remain responsible for those actions. If the key is absent, the API returns a configuration error.
 
-- Telnyx webhooks are signature-verified and event IDs are deduplicated.
-- Voice stream tickets are random, short-lived, one-time, and stored only as hashes. Internal agent routes require a configured shared secret; provider credentials never enter call prompts or logs.
-- Voice actions are limited to the phone number bound to a live Telnyx call. Browser account creation requires sequential caller-name confirmation and explicit account-creation consent; ordinary calls cannot create accounts. Reset messaging is generic to prevent account enumeration. Voice email sending requires the staged-draft confirmation flow described above.
-- Scheduled email APIs require a user session and configured password. Each schedule is sender-owned; recipients cannot view it before delivery starts. Cancellation and rescheduling are conditional atomic state changes, and versioned delayed jobs cannot bypass them.
-- Voice email currently treats the number being called as the sender identity, as agreed for this stage; OTP/account authentication is a planned later safeguard. Email content is staged briefly in Redis and is never logged by the voice agent or API action route.
-- Host ports for API and voice agent bind to loopback. Funnel publishes only required provider paths; MongoDB, Redis, SMTP, and ClamAV remain private.
-- SMTP is internal-only. ClamAV is a hard dependency for accepted mail; unavailability returns SMTP 451.
-- Raw mail/attachment storage uses generated paths on a local filesystem volume; multi-host object storage is out of scope.
-- Provider webhook schemas and voice quality depend on Telnyx account configuration and should be evaluated with controlled calls before production use.
+## Mail delivery and storage
+
+```mermaid
+sequenceDiagram
+  participant UI as Browser
+  participant API as API
+  participant DB as MongoDB
+  participant Q as Redis/BullMQ
+  participant W as Worker
+  participant SMTP as Internal SMTP
+  participant AV as ClamAV
+  UI->>API: Authenticated send request
+  API->>DB: Persist queued mail record
+  API->>Q: Enqueue email job
+  Q->>W: Deliver job
+  W->>SMTP: Send MIME through private network
+  SMTP->>AV: Scan each attachment
+  AV-->>SMTP: Clean or reject
+  SMTP->>DB: Record accepted message and status
+  SMTP-->>W: Delivery result
+```
+
+The API derives the sender identity from the authenticated user and validates local recipients. The worker constructs MIME and sends through the internal SMTP service. SMTP validates identities, parses the message, enforces attachment size, scans each attachment, stores generated attachment files and raw MIME, and records the accepted message. ClamAV unavailability is treated as a temporary SMTP failure; attachments are not accepted without a successful scan.
+
+### Scheduled mail
+
+Scheduled messages are stored in MongoDB with `deliveryStatus: scheduled`, a UTC delivery time, and a monotonically increasing `scheduleVersion`. BullMQ holds a delayed job keyed by message ID and version. The worker atomically transitions only the matching due version to queued before using the normal SMTP path. A recovery pass recreates missing delayed jobs from MongoDB records.
+
+Rescheduling creates a new version and invalidates the previous job. Cancellation changes the durable state and version before best-effort queue removal. Stale jobs therefore cannot send a cancelled or superseded schedule. Scheduling is limited to 1 minute through 365 days in the future. Recipients do not see a scheduled message before delivery begins; only the sender can list and manage pending schedules.
+
+## Voice assistant and Telnyx
+
+The optional voice profile connects Telnyx calls to Sarvam realtime STT, chat, VAD, and TTS. The agent handles a bidirectional 8 kHz mono PCMU media stream and packetizes synthesized audio into Telnyx media frames. Speech-start events can interrupt active synthesis, clear queued playback, and abort an in-flight response.
+
+The initial greeting is bilingual English/Hindi. Sarvam detects the language for each caller turn; the voice agent selects a supported voice from that turn's locale and transcript script so a caller can change languages mid-call. Supported output languages are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia. The call is conversational and does not use a keypad or DTMF menu.
+
+For email actions, the assistant gathers the recipient's ten-digit number, subject, and complete plain-text body. The API derives the sender from the active call's bound phone number, adds `LOCAL_MAIL_DOMAIN` to the recipient, and requires an existing active account. Before an immediate send or schedule, the assistant reads back the destination and summary/time and obtains an unambiguous confirmation. It can list, cancel, or reschedule pending voice-created schedules. Voice message content is held briefly in call-scoped Redis state and is not written to application logs.
+
+## Persistence model
+
+MongoDB records include:
+
+- **Users:** UUIDv7 public ID, normalized phone and local address, display name, avatar key, Argon2id password hash, password/account state, and timestamps.
+- **Emails:** UUIDv7 public ID, sender/recipient references and addresses, content, RFC thread headers, attachment metadata and raw MIME path, delivery/read/spam state, participant-scoped star/trash/delete state, schedule time/version/source, and timestamps.
+- **Drafts:** UUIDv7 public ID, owner, recipient, subject/body, attachment metadata, state, and timestamps.
+- **Audit logs:** event type, optional actor and related IDs, timestamp, and non-sensitive metadata.
+- **Webhook events:** provider event ID and processing time, with a unique index for idempotency.
+
+Redis holds opaque session data, queue state, OTP verification state, and short-lived call tickets/context. MongoDB stores one-time password-reset tokens. Session, OTP, reset, and call-ticket secrets are stored as hashes where applicable. Indexes support phone/address uniqueness, public IDs, inbox queries, owner-scoped drafts, expiry lookups, audit timestamps, and webhook deduplication.
+
+## Network boundaries
+
+- The API is published on the host at `API_PORT` (default `3000`) for local development. MongoDB, Redis, SMTP, and ClamAV are internal Compose services.
+- The frontend is published at `FRONTEND_PORT` (default `8080`). Browser requests use its same-origin Nginx proxy.
+- The voice agent's host port binds to loopback. It is included only with the `voice` Compose profile.
+- Tailscale Funnel is optional. The included helper publishes the Telnyx webhook paths and `/voice-stream` only; it keeps data stores, SMTP, ClamAV, and other API routes private.
+- Telnyx webhook signature verification remains enabled. The shared `VOICE_AGENT_API_TOKEN` protects internal agent actions.
+
+## Recovery and operational behavior
+
+- MongoDB is authoritative for accounts, mail, and schedule state; Redis queue loss does not erase schedule records.
+- The worker periodically reconciles pending schedules against BullMQ delayed jobs.
+- Telnyx webhook event IDs are persisted to make provider event handling idempotent.
+- SMTP retries temporary provider or scanner failures through the worker. A voice-scheduled email failure notification is queued only after delivery was attempted and retries are exhausted.
+- `/health` indicates API liveness. `/ready` checks required API dependencies. The frontend's `/healthz` checks that Nginx is serving.
+- `docker compose down -v` removes MongoDB, Redis, and mail-storage volumes and permanently deletes local persisted data.
+
+## Current boundaries
+
+Syscall currently handles mail within its configured local domain. External email, public MX/DNS, aliases, groups, and multi-host object storage are out of scope. Voice mail actions currently derive the sender from the phone number bound to the active Telnyx call; an additional OTP/account-authentication step for voice mail is a future safeguard. Telnyx call quality, webhook reachability, and SMS delivery depend on provider account setup. Review call/signup rate limits and deployment exposure before using a publicly reachable instance.

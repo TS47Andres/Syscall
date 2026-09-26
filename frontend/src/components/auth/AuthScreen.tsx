@@ -400,10 +400,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               )}
             </div>
 
-            {/* Error Message (for non-OTP steps) */}
-            {errorMessage && subStep !== 'otp' && (
+            {/* Error Message (for non-signin/non-otp steps) */}
+            {errorMessage && subStep !== 'otp' && (mode !== 'signin' || subStep !== 'form') && (
               <div style={styles.googleErrorBanner} className="animate-fade-in">
-                <IconAlert size={18} color="#B91C1C" />
+                <IconAlert size={16} color="#D93025" />
                 <span>{errorMessage}</span>
               </div>
             )}
@@ -552,13 +552,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     <input
                       type="tel"
                       value={phoneInput}
-                      onChange={(e) => setPhoneInput(e.target.value)}
+                      onChange={(e) => {
+                        if (errorMessage) setErrorMessage('');
+                        setPhoneInput(e.target.value);
+                      }}
                       placeholder="10-digit mobile number"
                       maxLength={14}
                       style={styles.phoneInputField}
                       autoFocus
                     />
                   </div>
+                  {errorMessage && signInWithOtp && (
+                    <div style={styles.fieldInlineError} className="animate-fade-in">
+                      <IconAlert size={14} color="#D93025" />
+                      <span>{errorMessage}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Password vs OTP */}
@@ -569,7 +578,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       <input
                         type={showPassword ? 'text' : 'password'}
                         value={password}
-                        onChange={(e) => setPassword(e.target.value)}
+                        onChange={(e) => {
+                          if (errorMessage) setErrorMessage('');
+                          setPassword(e.target.value);
+                        }}
                         placeholder="Enter your password"
                         style={{ ...styles.phoneInputField, paddingLeft: 14 }}
                       />
@@ -582,6 +594,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                         {showPassword ? <IconEyeOff size={18} color="#444746" /> : <IconEye size={18} color="#444746" />}
                       </button>
                     </div>
+
+                    {/* Inline error: no bg, below password field and above forgot password button */}
+                    {errorMessage && (
+                      <div style={styles.fieldInlineError} className="animate-fade-in">
+                        <IconAlert size={14} color="#D93025" />
+                        <span>{errorMessage}</span>
+                      </div>
+                    )}
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
                       <button
@@ -925,15 +945,28 @@ const styles: Record<string, React.CSSProperties> = {
   googleErrorBanner: {
     display: 'flex',
     alignItems: 'center',
-    gap: '10px',
-    padding: '10px 14px',
-    borderRadius: '8px',
-    backgroundColor: '#FDF2F2',
-    color: '#B91C1C',
-    fontSize: '13.5px',
+    gap: '8px',
+    padding: '4px 0',
+    backgroundColor: 'transparent',
+    background: 'none',
+    color: '#D93025',
+    fontSize: '13px',
     fontWeight: 500,
-    marginBottom: '20px',
-    border: '1px solid #FCA5A5',
+    marginBottom: '16px',
+    border: 'none',
+  },
+  fieldInlineError: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    background: 'none',
+    backgroundColor: 'transparent',
+    border: 'none',
+    color: '#D93025',
+    fontSize: '13px',
+    fontWeight: 500,
+    marginTop: '6px',
+    marginBottom: '2px',
   },
   otpInlineError: {
     display: 'flex',

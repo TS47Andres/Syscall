@@ -949,6 +949,173 @@ input, textarea, select {
 }
 
 /* ==========================================================================
+   Flatpickr Modern Time Picker & Action Button Styling
+   ========================================================================== */
+.flatpickr-calendar {
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.14), 0 2px 10px rgba(0, 0, 0, 0.08) !important;
+  border: 1px solid #E0E2EC !important;
+  border-radius: 18px !important;
+  overflow: visible !important;
+  font-family: var(--font-body) !important;
+  background-color: #FFFFFF !important;
+}
+
+.flatpickr-calendar.hasTime .flatpickr-time {
+  height: auto !important;
+  min-height: 52px !important;
+  max-height: none !important;
+  line-height: normal !important;
+  padding: 10px 14px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 8px !important;
+  border-top: 1px solid #EDF2F7 !important;
+  background-color: #F8FAFD !important;
+  border-bottom-left-radius: 18px !important;
+  border-bottom-right-radius: 18px !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+
+/* Time Input Wrappers & Fields: Added padding and fixed Y-axis cutting */
+.flatpickr-time .numInputWrapper {
+  height: 36px !important;
+  flex: 0 0 46px !important;
+  width: 46px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  position: relative !important;
+}
+
+.flatpickr-time input.flatpickr-hour,
+.flatpickr-time input.flatpickr-minute {
+  height: 36px !important;
+  line-height: 36px !important;
+  padding: 4px 6px !important;
+  border: 1px solid #D3E3FD !important;
+  border-radius: 8px !important;
+  background-color: #FFFFFF !important;
+  color: #041E49 !important;
+  font-family: var(--font-body) !important;
+  font-size: 14.5px !important;
+  font-weight: 600 !important;
+  text-align: center !important;
+  box-sizing: border-box !important;
+  transition: all 0.15s ease !important;
+}
+
+.flatpickr-time input.flatpickr-hour:hover,
+.flatpickr-time input.flatpickr-minute:hover {
+  border-color: #A8C7FA !important;
+}
+
+.flatpickr-time input.flatpickr-hour:focus,
+.flatpickr-time input.flatpickr-minute:focus {
+  border-color: #0B57D0 !important;
+  box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.18) !important;
+  outline: none !important;
+}
+
+/* Time Separator */
+.flatpickr-time .flatpickr-time-separator {
+  color: #444746 !important;
+  font-weight: 700 !important;
+  font-size: 16px !important;
+  line-height: 36px !important;
+  height: 36px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 10px !important;
+}
+
+/* AM / PM Toggle Badge */
+.flatpickr-time .flatpickr-am-pm {
+  height: 36px !important;
+  line-height: 34px !important;
+  padding: 0 12px !important;
+  border-radius: 8px !important;
+  border: 1px solid #D3E3FD !important;
+  background-color: #EAF1FB !important;
+  color: #0B57D0 !important;
+  font-family: var(--font-body) !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: background-color 0.15s ease, border-color 0.15s ease !important;
+}
+
+.flatpickr-time .flatpickr-am-pm:hover {
+  background-color: #D3E3FD !important;
+  border-color: #7CACF8 !important;
+}
+
+/* REMOVE up and down small arrows in input fields completely */
+.flatpickr-time .numInputWrapper span.arrowUp,
+.flatpickr-time .numInputWrapper span.arrowDown {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+.flatpickr-time .numInputWrapper:hover span.arrowUp,
+.flatpickr-time .numInputWrapper:hover span.arrowDown {
+  display: none !important;
+  opacity: 0 !important;
+}
+
+.flatpickr-time input[type="number"]::-webkit-inner-spin-button,
+.flatpickr-time input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none !important;
+  margin: 0 !important;
+  display: none !important;
+}
+
+.flatpickr-time input[type="number"] {
+  -moz-appearance: textfield !important;
+  appearance: textfield !important;
+}
+
+/* Green Tick Confirm Button */
+.flatpickr-confirm-tick-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  border-radius: 50% !important;
+  background-color: #1E8E3E !important;
+  border: none !important;
+  cursor: pointer !important;
+  color: #FFFFFF !important;
+  margin-left: 6px !important;
+  box-shadow: 0 2px 6px rgba(30, 142, 62, 0.35) !important;
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  flex-shrink: 0 !important;
+  padding: 0 !important;
+}
+
+.flatpickr-confirm-tick-btn:hover {
+  background-color: #137333 !important;
+  transform: scale(1.08) !important;
+  box-shadow: 0 4px 10px rgba(19, 115, 51, 0.45) !important;
+}
+
+.flatpickr-confirm-tick-btn:active {
+  transform: scale(0.95) !important;
+}
+
+/* ==========================================================================
    Compose Attachment & File Upload Styling
    ========================================================================== */
 .compose-attach-btn {

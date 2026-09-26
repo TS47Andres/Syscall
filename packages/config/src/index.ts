@@ -16,7 +16,7 @@ const environmentSchema = z.object({
   SESSION_TTL_DAYS: z.coerce.number().int().positive().default(30),
   OTP_EXPIRY_MINUTES: z.coerce.number().int().positive().default(5),
   OTP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
-  OTP_MAX_FAILED_ATTEMPTS_PER_DAY: z.coerce.number().int().positive().default(3),
+  OTP_MAX_FAILED_ATTEMPTS_PER_DAY: z.coerce.number().int().positive().default(10),
   PASSWORD_RESET_EXPIRY_HOURS: z.coerce.number().int().positive().default(2),
   TELNYX_API_KEY: z.string().optional().or(z.literal('')),
   TELNYX_PUBLIC_KEY: z.string().optional().or(z.literal('')),

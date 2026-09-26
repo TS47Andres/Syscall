@@ -400,8 +400,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               )}
             </div>
 
-            {/* Error Message */}
-            {errorMessage && (
+            {/* Error Message (for non-OTP steps) */}
+            {errorMessage && subStep !== 'otp' && (
               <div style={styles.googleErrorBanner} className="animate-fade-in">
                 <IconAlert size={18} color="#B91C1C" />
                 <span>{errorMessage}</span>
@@ -656,11 +656,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   <span style={styles.fieldLabel}>Enter 6-digit verification code</span>
                   <OtpInputGroup
                     otpDigits={otpDigits}
-                    onChangeDigits={setOtpDigits}
+                    onChangeDigits={(digits) => {
+                      if (errorMessage) setErrorMessage('');
+                      setOtpDigits(digits);
+                    }}
                     onComplete={(code) => void handleVerifyOtp(code)}
                     onEnter={() => void handleVerifyOtp()}
                   />
                 </div>
+
+                {/* Inline OTP Error: Clean, no background, below input fields and above resend code button */}
+                {errorMessage && (
+                  <div style={styles.otpInlineError} className="animate-fade-in">
+                    <IconAlert size={15} color="#D93025" />
+                    <span>{errorMessage}</span>
+                  </div>
+                )}
 
                 <div style={styles.resendRow}>
                   {resendCooldown > 0 ? (
@@ -923,6 +934,20 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 500,
     marginBottom: '20px',
     border: '1px solid #FCA5A5',
+  },
+  otpInlineError: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '6px',
+    background: 'none',
+    backgroundColor: 'transparent',
+    border: 'none',
+    color: '#D93025',
+    fontSize: '13px',
+    fontWeight: 500,
+    padding: '2px 0',
+    textAlign: 'center',
   },
   formStack: {
     display: 'flex',

@@ -34,14 +34,44 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   type RawBodyRequest = FastifyRequest & { rawBody?: string };
   app.removeContentTypeParser('application/json');
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
-    const rawBody = body as string;
+    const rawBody = (body as string) || '';
     (request as RawBodyRequest).rawBody = rawBody;
+    if (!rawBody.trim()) {
+      done(null, {});
+      return;
+    }
     try { done(null, JSON.parse(rawBody)); } catch (error) { done(error as Error, undefined); }
   });
   await app.register(cors, { origin: false });
 
   // Creates an HTTP-aware error without requiring a global error plugin.
   function httpError(statusCode: number, message: string): Error & { statusCode: number } { return Object.assign(new Error(message), { statusCode }); }
+
+  app.setErrorHandler((error: any, request, reply) => {
+    if (error?.name === 'ZodError' || error instanceof z.ZodError) {
+      return reply.code(400).send({ error: error?.issues?.[0]?.message || error.message || 'Invalid request parameters.' });
+    }
+    const statusCode = error?.statusCode || error?.status;
+    if (statusCode && statusCode >= 400 && statusCode < 500) {
+      return reply.code(statusCode).send({ error: error.message });
+    }
+    const msg = error?.message || '';
+    if (
+      msg.includes('OTP') ||
+      msg.includes('Wrong OTP') ||
+      msg.includes('limit reached') ||
+      msg.includes('cooldown') ||
+      msg.includes('invalid') ||
+      msg.includes('expired')
+    ) {
+      const code = (msg.includes('cooldown') || msg.includes('limit reached')) ? 429 : 400;
+      return reply.code(code).send({ error: msg });
+    }
+    request.log.error(error);
+    return reply.code(statusCode || 500).send({
+      error: error.message || 'An unexpected error occurred.',
+    });
+  });
 
   // Converts caller-supplied absolute or relative schedule input using the API clock.
   function scheduleTime(input: { scheduledAt?: string; delaySeconds?: number }): Date {
@@ -128,7 +158,18 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
 
   app.post('/api/auth/otp/request', async (request, reply) => {
     const body = z.object({ phone: z.string() }).parse(request.body);
-    await requestOtp(context, body.phone);
+    try {
+      await requestOtp(context, body.phone);
+    } catch (err: any) {
+      const msg = (err?.message || '').toLowerCase();
+      if (msg.includes('cooldown')) {
+        throw httpError(429, 'Please wait before requesting another code.');
+      }
+      if (msg.includes('limit reached')) {
+        throw httpError(429, 'Daily OTP request limit reached. Please try again later.');
+      }
+      throw httpError(400, err?.message || 'Unable to request verification code.');
+    }
     const phoneE164 = toPhoneE164(body.phone);
     const existing = await User.findOne({ phoneE164, accountStatus: 'active' });
     let avatarUrl: string | null = null;

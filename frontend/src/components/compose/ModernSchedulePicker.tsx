@@ -27,11 +27,49 @@ export const ModernSchedulePicker: React.FC<ModernSchedulePickerProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fpRef = useRef<FlatpickrInstance | null>(null);
 
+  const onScheduleChangeRef = useRef(onScheduleChange);
+  onScheduleChangeRef.current = onScheduleChange;
+
   useEffect(() => {
     if (!inputRef.current) return;
 
     // Minimum allowed time is 2 minutes into the future
     const minDateTime = new Date(Date.now() + 2 * 60 * 1000);
+
+    const ensureTickButton = (instance: FlatpickrInstance) => {
+      if (!instance.calendarContainer) return;
+      const timeContainer = instance.timeContainer;
+      if (!timeContainer) return;
+
+      if (timeContainer.querySelector('.flatpickr-confirm-tick-btn')) return;
+
+      const tickBtn = document.createElement('button');
+      tickBtn.type = 'button';
+      tickBtn.className = 'flatpickr-confirm-tick-btn';
+      tickBtn.title = 'Confirm date & time';
+      tickBtn.setAttribute('aria-label', 'Confirm date and time');
+      tickBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      `;
+
+      tickBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (instance.selectedDates.length > 0) {
+          onScheduleChangeRef.current(instance.selectedDates[0].toISOString());
+        } else {
+          const defaultDateTime = new Date(Date.now() + 2 * 60 * 1000);
+          instance.setDate(defaultDateTime, true);
+          onScheduleChangeRef.current(defaultDateTime.toISOString());
+        }
+        instance.close();
+      });
+
+      timeContainer.appendChild(tickBtn);
+    };
 
     const fp = flatpickr(inputRef.current, {
       enableTime: true,
@@ -45,6 +83,12 @@ export const ModernSchedulePicker: React.FC<ModernSchedulePickerProps> = ({
       position: 'auto',
       disableMobile: true,
       defaultDate: scheduledAt ? new Date(scheduledAt) : undefined,
+      onReady: (_dates, _str, instance) => {
+        ensureTickButton(instance);
+      },
+      onOpen: (_dates, _str, instance) => {
+        ensureTickButton(instance);
+      },
       onChange: (selectedDates) => {
         if (selectedDates && selectedDates.length > 0) {
           onScheduleChange(selectedDates[0].toISOString());

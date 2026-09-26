@@ -103,7 +103,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
 
   // Returns common user-safe JSON without exposing password or internal identifiers.
   function publicUser(user: UserDocument): Record<string, unknown> {
-    return { id: user.publicId, phone: user.phone10Digit, emailAddress: user.emailAddress, name: user.displayName, avatarAvailable: Boolean(user.avatarStorageKey), passwordConfigured: user.passwordConfigured, accountStatus: user.accountStatus };
+    return { id: user.publicId, phone: user.phone10Digit, emailAddress: user.emailAddress, name: user.displayName, avatarAvailable: Boolean(user.avatarStorageKey), passwordConfigured: user.passwordConfigured, accountStatus: user.accountStatus, gender: user.gender ?? null, dateOfBirth: user.dateOfBirth ?? null, language: user.language ?? 'en' };
   }
 
   // Deletes the authenticated participant's copy without purging the other participant's mail.
@@ -363,6 +363,69 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     }).safeParse(generated);
     if (!parsed.success) throw httpError(502, 'Sarvam returned an incomplete email draft. Please try again.');
     return parsed.data;
+  });
+
+  // Translates text to a target language using Sarvam 105B chat completions.
+  app.post('/api/ai/translate', async (request) => {
+    await requireUser(request);
+    const body = z.object({
+      text: z.string().trim().min(1).max(12000),
+      targetLanguage: z.string().min(2).max(50),
+      sourceLanguage: z.string().max(50).optional(),
+    }).parse(request.body);
+    if (!config.SARVAM_API_KEY) throw httpError(503, 'AI translation is not configured.');
+
+    let response: Response;
+    try {
+      response = await fetch('https://api.sarvam.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'api-subscription-key': config.SARVAM_API_KEY, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: 'sarvam-105b',
+          messages: [
+            {
+              role: 'system',
+              content: `You are an accurate, professional translator. Translate the given text into ${body.targetLanguage}${body.sourceLanguage ? ` from ${body.sourceLanguage}` : ''}. Maintain natural phrasing, formatting, and tone. Return ONLY a valid JSON object with the field "translatedText" containing the translated string. Do not include markdown fences or explanations.`,
+            },
+            {
+              role: 'user',
+              content: body.text,
+            },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.2,
+          max_tokens: 2000,
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+    } catch {
+      throw httpError(502, 'Sarvam translation request timed out. Please try again.');
+    }
+
+    if (!response.ok) {
+      logger.error({ status: response.status }, 'Sarvam translation failed');
+      throw httpError(502, 'Sarvam could not translate the text. Please try again.');
+    }
+
+    const completion = await response.json().catch(() => null) as {
+      choices?: Array<{ message?: { content?: string | null } }>;
+    } | null;
+    const content = completion?.choices?.[0]?.message?.content;
+    if (typeof content !== 'string') throw httpError(502, 'Sarvam returned an empty translation. Please try again.');
+
+    let generated: unknown;
+    try {
+      generated = JSON.parse(content);
+    } catch {
+      return { translatedText: content.trim() };
+    }
+
+    const parsed = z.object({ translatedText: z.string() }).safeParse(generated);
+    if (!parsed.success) {
+      const textVal = (generated as any)?.translatedText || (generated as any)?.translation || (generated as any)?.text || content.trim();
+      return { translatedText: String(textVal) };
+    }
+    return { translatedText: parsed.data.translatedText };
   });
 
   app.post('/api/auth/logout', async (request) => {
@@ -674,14 +737,29 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
         avatarUrl = `data:image/jpeg;base64,${bytes.toString('base64')}`;
       }
     }
-    return { name: user.displayName, avatarUrl };
+    return {
+      name: user.displayName,
+      avatarUrl,
+      gender: user.gender ?? null,
+      dateOfBirth: user.dateOfBirth ?? null,
+      language: user.language ?? 'en',
+    };
   });
 
   // Saves the caller's name and replaces an optional validated JPEG avatar.
   app.patch('/api/profile', async (request) => {
     const user = await requireUser(request);
-    const body = z.object({ name: z.string().trim().min(1).max(100).optional(), avatarBase64: z.string().max(350_000).optional() }).parse(request.body);
+    const body = z.object({
+      name: z.string().trim().min(1).max(100).optional(),
+      avatarBase64: z.string().max(350_000).optional(),
+      gender: z.enum(['male', 'female', 'other', 'prefer_not_to_say']).nullable().optional(),
+      dateOfBirth: z.string().nullable().optional(),
+      language: z.string().max(20).optional(),
+    }).parse(request.body);
     if (body.name !== undefined) user.displayName = body.name;
+    if (body.gender !== undefined) user.gender = body.gender;
+    if (body.dateOfBirth !== undefined) user.dateOfBirth = body.dateOfBirth;
+    if (body.language !== undefined) user.language = body.language;
     if (body.avatarBase64 !== undefined) {
       const bytes = Buffer.from(body.avatarBase64, 'base64');
       if (bytes.length > 256 * 1024 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) throw httpError(400, 'Profile photo must be a JPEG under 256 KB.');
@@ -690,7 +768,13 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
       if (oldKey) await removeGeneratedFile(config.ATTACHMENT_STORAGE_PATH, oldKey);
     }
     await user.save();
-    return { name: user.displayName, avatarAvailable: Boolean(user.avatarStorageKey) };
+    return {
+      name: user.displayName,
+      avatarAvailable: Boolean(user.avatarStorageKey),
+      gender: user.gender ?? null,
+      dateOfBirth: user.dateOfBirth ?? null,
+      language: user.language ?? 'en',
+    };
   });
 
   // Lists only live messages visible to this participant, with participant-specific flags.

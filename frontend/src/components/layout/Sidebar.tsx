@@ -22,6 +22,9 @@ import {
 } from '../Icons';
 import type { Email } from '../../types';
 
+import { useMail } from '../../context/MailContext';
+import { t } from '../../utils/i18n';
+
 export type FolderId =
   | 'inbox'
   | 'starred'
@@ -58,80 +61,83 @@ export const Sidebar: React.FC<SidebarProps> = ({
   userPhone,
   isCollapsed = false,
 }) => {
+  const { currentUser } = useMail();
+  const lang = currentUser?.language || 'en';
+
   const isPromoMail = (mail: Email) => {
-    const t = (mail.subject + ' ' + mail.textBody).toLowerCase();
+    const text = (mail.subject + ' ' + mail.textBody).toLowerCase();
     return (
-      t.includes('promo') ||
-      t.includes('offer') ||
-      t.includes('discount') ||
-      t.includes('deal') ||
-      t.includes('sale') ||
-      t.includes('coupon') ||
-      t.includes('cashback') ||
-      t.includes('shopping') ||
-      t.includes('store')
+      text.includes('promo') ||
+      text.includes('offer') ||
+      text.includes('discount') ||
+      text.includes('deal') ||
+      text.includes('sale') ||
+      text.includes('coupon') ||
+      text.includes('cashback') ||
+      text.includes('shopping') ||
+      text.includes('store')
     );
   };
 
   const isSocialMail = (mail: Email) => {
-    const t = (mail.subject + ' ' + mail.textBody).toLowerCase();
+    const text = (mail.subject + ' ' + mail.textBody).toLowerCase();
     return (
-      t.includes('social') ||
-      t.includes('connect') ||
-      t.includes('network') ||
-      t.includes('linkedin') ||
-      t.includes('twitter') ||
-      t.includes('instagram') ||
-      t.includes('facebook') ||
-      t.includes('youtube') ||
-      t.includes('community') ||
-      t.includes('invite')
+      text.includes('social') ||
+      text.includes('connect') ||
+      text.includes('network') ||
+      text.includes('linkedin') ||
+      text.includes('twitter') ||
+      text.includes('instagram') ||
+      text.includes('facebook') ||
+      text.includes('youtube') ||
+      text.includes('community') ||
+      text.includes('invite')
     );
   };
 
   const isPurchaseMail = (mail: Email) => {
-    const t = (mail.subject + ' ' + mail.textBody).toLowerCase();
+    const text = (mail.subject + ' ' + mail.textBody).toLowerCase();
     return (
-      t.includes('purchase') ||
-      t.includes('order') ||
-      t.includes('invoice') ||
-      t.includes('receipt') ||
-      t.includes('bill') ||
-      t.includes('payment') ||
-      t.includes('transaction') ||
-      t.includes('paid')
+      text.includes('purchase') ||
+      text.includes('order') ||
+      text.includes('invoice') ||
+      text.includes('receipt') ||
+      text.includes('bill') ||
+      text.includes('payment') ||
+      text.includes('transaction') ||
+      text.includes('paid')
     );
   };
 
   const isImportantMail = (mail: Email) => {
-    const t = (mail.subject + ' ' + mail.textBody).toLowerCase();
+    const text = (mail.subject + ' ' + mail.textBody).toLowerCase();
     return (
       starredIds.has(mail.publicId) ||
-      t.includes('important') ||
-      t.includes('urgent') ||
-      t.includes('otp') ||
-      t.includes('security') ||
-      t.includes('telecom') ||
-      t.includes('alert') ||
-      t.includes('welcome')
+      text.includes('important') ||
+      text.includes('urgent') ||
+      text.includes('otp') ||
+      text.includes('security') ||
+      text.includes('telecom') ||
+      text.includes('alert') ||
+      text.includes('welcome')
     );
   };
 
   const isUpdateMail = (mail: Email) => {
-    const t = (mail.subject + ' ' + mail.textBody).toLowerCase();
+    const text = (mail.subject + ' ' + mail.textBody).toLowerCase();
     return (
-      t.includes('update') ||
-      t.includes('notification') ||
-      t.includes('confirm') ||
-      t.includes('receipt') ||
-      t.includes('bill') ||
-      t.includes('statement') ||
-      t.includes('alert') ||
-      t.includes('security') ||
-      t.includes('verify') ||
-      t.includes('welcome') ||
-      t.includes('telecom') ||
-      t.includes('account')
+      text.includes('update') ||
+      text.includes('notification') ||
+      text.includes('confirm') ||
+      text.includes('receipt') ||
+      text.includes('bill') ||
+      text.includes('statement') ||
+      text.includes('alert') ||
+      text.includes('security') ||
+      text.includes('verify') ||
+      text.includes('welcome') ||
+      text.includes('telecom') ||
+      text.includes('account')
     );
   };
 
@@ -143,49 +149,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }> = [
     {
       id: 'inbox',
-      label: 'Inbox',
+      label: t('inbox', lang),
       icon: (act) => <IconInbox size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !m.isSpam && !m.readAt && !trashIds.has(m.publicId)).length,
     },
     {
       id: 'sent',
-      label: 'Sent',
+      label: t('sent', lang),
       icon: (act) => <IconSent size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => m.senderAddress.includes(userPhone) && !trashIds.has(m.publicId)).length,
     },
     {
       id: 'allmail',
-      label: 'All Mail',
+      label: t('allmail', lang),
       icon: (act) => <IconAllMail size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && !m.isSpam).length,
     },
     {
       id: 'starred',
-      label: 'Starred',
+      label: t('starred', lang),
       icon: (act) => <IconStar size={18} filled={act} color={act ? '#B06000' : '#444746'} />,
       count: emails.filter((m) => starredIds.has(m.publicId) && !trashIds.has(m.publicId)).length,
     },
     {
       id: 'snoozed',
-      label: 'Snoozed',
+      label: t('snoozed', lang),
       icon: (act) => <IconSnoozed size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: 0,
     },
     {
       id: 'important',
-      label: 'Important',
+      label: t('important', lang),
       icon: (act) => <IconImportant size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isImportantMail(m) && !m.readAt).length,
     },
     {
       id: 'scheduled',
-      label: 'Scheduled',
+      label: t('scheduled', lang),
       icon: (act) => <IconScheduled size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((mail) => mail.deliveryStatus === 'scheduled').length,
     },
     {
       id: 'drafts',
-      label: 'Drafts',
+      label: t('drafts', lang),
       icon: (act) => <IconDrafts size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((mail) => mail.isDraft).length,
     },
@@ -199,25 +205,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }> = [
     {
       id: 'promotions',
-      label: 'Promotions',
+      label: t('promotions', lang),
       icon: (act) => <IconPromotions size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isPromoMail(m) && !m.readAt).length,
     },
     {
       id: 'social',
-      label: 'Social',
+      label: t('social', lang),
       icon: (act) => <IconSocial size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isSocialMail(m) && !m.readAt).length,
     },
     {
       id: 'purchases',
-      label: 'Purchases',
+      label: t('purchases', lang),
       icon: (act) => <IconPurchases size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isPurchaseMail(m) && !m.readAt).length,
     },
     {
       id: 'updates',
-      label: 'Updates',
+      label: t('updates', lang),
       icon: (act) => <IconUpdates size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isUpdateMail(m) && !m.readAt).length,
     },
@@ -231,13 +237,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }> = [
     {
       id: 'spam',
-      label: 'Spam',
+      label: t('spam', lang),
       icon: (act) => <IconSpam size={18} color={act ? '#BA1A1A' : '#444746'} />,
       count: emails.filter((m) => m.isSpam && !trashIds.has(m.publicId)).length,
     },
     {
       id: 'bin',
-      label: 'Bin',
+      label: t('bin', lang),
       icon: (act) => <IconTrash size={18} color={act ? '#BA1A1A' : '#444746'} />,
       count: trashIds.size,
     },

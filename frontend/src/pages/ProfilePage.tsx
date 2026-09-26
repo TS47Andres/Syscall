@@ -9,6 +9,7 @@ export const ProfilePage: React.FC = () => {
     currentUser,
     handleUpdateName,
     handleUpdatePhoto,
+    handleUpdateProfileDetails,
     handleSignOut,
   } = useMail();
 
@@ -22,6 +23,7 @@ export const ProfilePage: React.FC = () => {
         currentUser={currentUser}
         onUpdateName={handleUpdateName}
         onUpdatePhoto={handleUpdatePhoto}
+        onUpdateProfileDetails={handleUpdateProfileDetails}
         onSignOut={handleSignOut}
         onBackToMail={handleBackToMail}
       />

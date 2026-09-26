@@ -1,5 +1,7 @@
 import React from 'react';
 import { IconInbox, IconPromotions, IconSocial, IconUpdates } from '../Icons';
+import { useMail } from '../../context/MailContext';
+import { t } from '../../utils/i18n';
 
 export type TabCategory = 'all' | 'promotions' | 'social' | 'updates';
 
@@ -9,6 +11,9 @@ interface CategoryTabsProps {
 }
 
 export const CategoryTabs: React.FC<CategoryTabsProps> = ({ activeTab, onSelectTab }) => {
+  const { currentUser } = useMail();
+  const lang = currentUser?.language || 'en';
+
   return (
     <div className="gmail-cat-tabs-row no-scrollbar">
       <button
@@ -16,7 +21,7 @@ export const CategoryTabs: React.FC<CategoryTabsProps> = ({ activeTab, onSelectT
         onClick={() => onSelectTab('all')}
       >
         <IconInbox size={15} />
-        <span>Primary</span>
+        <span>{t('primary', lang)}</span>
       </button>
 
       <button
@@ -24,7 +29,7 @@ export const CategoryTabs: React.FC<CategoryTabsProps> = ({ activeTab, onSelectT
         onClick={() => onSelectTab('promotions')}
       >
         <IconPromotions size={15} />
-        <span>Promotions</span>
+        <span>{t('promotions', lang)}</span>
       </button>
 
       <button
@@ -32,7 +37,7 @@ export const CategoryTabs: React.FC<CategoryTabsProps> = ({ activeTab, onSelectT
         onClick={() => onSelectTab('social')}
       >
         <IconSocial size={15} />
-        <span>Social</span>
+        <span>{t('social', lang)}</span>
       </button>
 
       <button
@@ -40,7 +45,7 @@ export const CategoryTabs: React.FC<CategoryTabsProps> = ({ activeTab, onSelectT
         onClick={() => onSelectTab('updates')}
       >
         <IconUpdates size={15} />
-        <span>Updates</span>
+        <span>{t('updates', lang)}</span>
       </button>
     </div>
   );

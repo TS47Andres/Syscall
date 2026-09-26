@@ -5,7 +5,11 @@ import {
   IconSearch,
   IconClose,
   IconSarvamAI,
+  IconSliders,
 } from '../Icons';
+import { SearchFilterDropdown } from '../mail/SearchFilterDropdown';
+import { useMail } from '../../context/MailContext';
+import { t } from '../../utils/i18n';
 import type { User } from '../../types';
 import { getInitials } from '../../types';
 
@@ -28,6 +32,21 @@ export const Header: React.FC<HeaderProps> = ({
   onProfileClick,
   isProfilePageOpen,
 }) => {
+  const { searchFilters, setSearchFilters, resetSearchFilters } = useMail();
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  const hasActiveFilters = Boolean(
+    searchFilters.from ||
+    searchFilters.to ||
+    searchFilters.subject ||
+    searchFilters.hasWords ||
+    searchFilters.hasAttachment ||
+    searchFilters.isStarred ||
+    searchFilters.isUnread ||
+    (searchFilters.dateRange && searchFilters.dateRange !== 'all') ||
+    (searchFilters.folderScope && searchFilters.folderScope !== 'current')
+  );
+
   // Current Header Time (Day, Date, Time hh:mm in 24-hour format, no bg)
   const [headerTime, setHeaderTime] = useState<string>(() => {
     const now = new Date();
@@ -77,7 +96,12 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Center: Search Field */}
-      <div style={styles.searchBar}>
+      <div
+        style={{
+          ...styles.searchBar,
+          ...(isFilterOpen ? styles.searchBarExpanded : {}),
+        }}
+      >
         <button
           style={styles.mobileHamburger}
           className="mobile-only"
@@ -95,15 +119,39 @@ export const Header: React.FC<HeaderProps> = ({
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search in mail"
+          placeholder={t('search_placeholder', currentUser.language)}
           style={styles.searchInput}
         />
 
         {searchQuery && (
-          <button style={styles.clearSearchBtn} onClick={() => onSearchChange('')} title="Clear search">
+          <button style={styles.clearSearchBtn} onClick={() => onSearchChange('')} title={t('clear_search', currentUser.language)}>
             <IconClose size={15} color="#5E5E5E" />
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={() => setIsFilterOpen(!isFilterOpen)}
+          style={{
+            ...styles.filterToggleBtn,
+            backgroundColor: isFilterOpen || hasActiveFilters ? '#E8F0FE' : 'transparent',
+            color: hasActiveFilters ? '#0B57D0' : '#444746',
+          }}
+          title={t('search_options', currentUser.language)}
+          aria-label={t('search_options', currentUser.language)}
+        >
+          <IconSliders size={18} color={hasActiveFilters ? '#0B57D0' : '#444746'} />
+          {hasActiveFilters && <span style={styles.activeFilterDot} />}
+        </button>
+
+        <SearchFilterDropdown
+          isOpen={isFilterOpen}
+          onClose={() => setIsFilterOpen(false)}
+          filters={searchFilters}
+          onApplyFilters={(newFilters) => setSearchFilters(newFilters)}
+          onResetFilters={resetSearchFilters}
+          currentLanguage={currentUser.language}
+        />
       </div>
 
       {/* Right: Current Time + Sarvam AI Logo + Profile Avatar */}
@@ -195,6 +243,14 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '0 8px 0 16px',
     boxShadow: 'var(--shadow-search)',
     transition: 'background-color 0.2s, box-shadow 0.2s',
+    position: 'relative',
+    zIndex: 50,
+  },
+  searchBarExpanded: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: '24px 24px 0 0',
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.16)',
+    zIndex: 600,
   },
   mobileHamburger: {
     background: 'none',
@@ -232,6 +288,29 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     background: 'none',
     border: 'none',
+  },
+  filterToggleBtn: {
+    position: 'relative',
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    border: 'none',
+    transition: 'background-color 0.15s',
+    flexShrink: 0,
+    marginLeft: '4px',
+  },
+  activeFilterDot: {
+    position: 'absolute',
+    top: '5px',
+    right: '5px',
+    width: '7px',
+    height: '7px',
+    borderRadius: '50%',
+    backgroundColor: '#0B57D0',
   },
   rightArea: {
     display: 'flex',

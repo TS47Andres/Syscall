@@ -237,13 +237,18 @@ class SyscallApi {
   }
 
   // Loads profile data from server-side persistence.
-  async getProfile(): Promise<{ name: string; avatarUrl: string | null }> {
+  async getProfile(): Promise<{ name: string; avatarUrl: string | null; gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null; dateOfBirth?: string | null; language?: string }> {
     return this.request('/api/profile');
   }
 
-  // Saves a name and optional JPEG data to the authenticated profile.
-  async updateProfile(input: { name?: string; avatarBase64?: string }): Promise<{ name: string; avatarAvailable: boolean }> {
+  // Saves name, avatar, gender, dateOfBirth, and language to the authenticated profile.
+  async updateProfile(input: { name?: string; avatarBase64?: string; gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null; dateOfBirth?: string | null; language?: string }): Promise<{ name: string; avatarAvailable: boolean; gender?: string | null; dateOfBirth?: string | null; language?: string }> {
     return this.request('/api/profile', { method: 'PATCH', body: JSON.stringify(input) });
+  }
+
+  // Translates text using Sarvam AI translation endpoint.
+  async translateText(text: string, targetLanguage: string, sourceLanguage?: string): Promise<{ translatedText: string }> {
+    return this.request('/api/ai/translate', { method: 'POST', body: JSON.stringify({ text, targetLanguage, sourceLanguage }) });
   }
 
   // Downloads an authenticated email or draft attachment as a browser Blob.

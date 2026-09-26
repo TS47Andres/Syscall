@@ -18,6 +18,9 @@ export interface UserDocument extends Document {
   accountStatus: 'active' | 'disabled';
   lastLoginAt: Date | null;
   sessionsRevokedAt: Date;
+  gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null;
+  dateOfBirth?: string | null;
+  language?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -118,6 +121,9 @@ const userSchema = new Schema<UserDocument>({
   accountStatus: { type: String, enum: ['active', 'disabled'], default: 'active', index: true },
   lastLoginAt: { type: Date, default: null },
   sessionsRevokedAt: { type: Date, default: Date.now },
+  gender: { type: String, enum: ['male', 'female', 'other', 'prefer_not_to_say', null], default: null },
+  dateOfBirth: { type: String, default: null },
+  language: { type: String, default: 'en' },
 }, { timestamps: true });
 
 const emailSchema = new Schema<EmailDocument>({

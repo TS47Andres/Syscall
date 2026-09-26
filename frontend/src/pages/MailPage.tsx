@@ -29,6 +29,7 @@ export const MailPage: React.FC = () => {
     starredIds,
     trashIds,
     searchQuery,
+    searchFilters,
     categoryTab,
     setCategoryTab,
     refreshing,
@@ -58,80 +59,138 @@ export const MailPage: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Filtered emails based on folder, category tabs, and search query
+  // Filtered emails based on folder, category tabs, and search query + advanced filters
   const filteredEmails = useMemo(() => {
+    const activeFolderScope = searchFilters.folderScope || 'current';
+
     return emails.filter((mail) => {
       const isTrashed = trashIds.has(mail.publicId);
 
-      // Bin view: show ONLY binned emails
-      if (folder === 'bin' || folder === 'trash') {
-        if (!isTrashed) return false;
-        if (searchQuery.trim()) {
-          const q = searchQuery.toLowerCase();
-          return (
-            mail.subject.toLowerCase().includes(q) ||
-            mail.senderAddress.toLowerCase().includes(q) ||
-            mail.textBody.toLowerCase().includes(q)
-          );
+      // Folder routing / scope filtering
+      if (activeFolderScope !== 'current') {
+        if (activeFolderScope === 'all') {
+          // Show all non-binned messages
+          if (isTrashed) return false;
+        } else if (activeFolderScope === 'trash') {
+          if (!isTrashed) return false;
+        } else {
+          if (isTrashed) return false;
+          if (activeFolderScope === 'inbox' && mail.recipientAddress !== currentUser.emailAddress) return false;
+          if (activeFolderScope === 'sent' && !mail.senderAddress.includes(currentUser.phone)) return false;
+          if (activeFolderScope === 'drafts' && !mail.isDraft) return false;
+          if (activeFolderScope === 'scheduled' && mail.deliveryStatus !== 'scheduled') return false;
+          if (activeFolderScope === 'spam' && !mail.isSpam) return false;
         }
-        return true;
-      }
-
-      // Non-bin views: exclude binned emails
-      if (isTrashed) return false;
-      if (mail.isDraft && folder !== 'drafts') return false;
-      if (mail.deliveryStatus === 'scheduled' && folder !== 'scheduled') return false;
-
-      // Spam filtering
-      if (folder === 'spam') {
-        if (!mail.isSpam) return false;
       } else {
-        if (mail.isSpam) return false;
-      }
+        // Standard current folder routing
+        // Bin view: show ONLY binned emails
+        if (folder === 'bin' || folder === 'trash') {
+          if (!isTrashed) return false;
+        } else {
+          // Non-bin views: exclude binned emails
+          if (isTrashed) return false;
+          if (mail.isDraft && folder !== 'drafts') return false;
+          if (mail.deliveryStatus === 'scheduled' && folder !== 'scheduled') return false;
 
-      // Specific folder routing
-      if (folder === 'starred') {
-        if (!starredIds.has(mail.publicId)) return false;
-      } else if (folder === 'snoozed') {
-        return false;
-      } else if (folder === 'important') {
-        if (!isImportantMail(mail, starredIds)) return false;
-      } else if (folder === 'sent') {
-        if (!mail.senderAddress.includes(currentUser.phone)) return false;
-      } else if (folder === 'scheduled') {
-        if (mail.deliveryStatus !== 'scheduled') return false;
-      } else if (folder === 'drafts') {
-        if (!mail.isDraft) return false;
-      } else if (folder === 'allmail') {
-        // Shows all non-binned messages
-      } else if (folder === 'purchases') {
-        if (!isPurchaseMail(mail)) return false;
-      } else if (folder === 'social') {
-        if (!isSocialMail(mail)) return false;
-      } else if (folder === 'promotions') {
-        if (!isPromoMail(mail)) return false;
-      } else if (folder === 'updates') {
-        if (!isUpdateMail(mail)) return false;
-      } else if (folder === 'inbox') {
-        if (mail.recipientAddress !== currentUser.emailAddress) return false;
-        if (categoryTab === 'promotions' && !isPromoMail(mail)) return false;
-        if (categoryTab === 'social' && !isSocialMail(mail)) return false;
-        if (categoryTab === 'updates') {
-          if (!isUpdateMail(mail)) return false;
+          // Spam filtering
+          if (folder === 'spam') {
+            if (!mail.isSpam) return false;
+          } else {
+            if (mail.isSpam) return false;
+          }
+
+          // Specific folder routing
+          if (folder === 'starred') {
+            if (!starredIds.has(mail.publicId)) return false;
+          } else if (folder === 'snoozed') {
+            return false;
+          } else if (folder === 'important') {
+            if (!isImportantMail(mail, starredIds)) return false;
+          } else if (folder === 'sent') {
+            if (!mail.senderAddress.includes(currentUser.phone)) return false;
+          } else if (folder === 'scheduled') {
+            if (mail.deliveryStatus !== 'scheduled') return false;
+          } else if (folder === 'drafts') {
+            if (!mail.isDraft) return false;
+          } else if (folder === 'allmail') {
+            // Shows all non-binned messages
+          } else if (folder === 'purchases') {
+            if (!isPurchaseMail(mail)) return false;
+          } else if (folder === 'social') {
+            if (!isSocialMail(mail)) return false;
+          } else if (folder === 'promotions') {
+            if (!isPromoMail(mail)) return false;
+          } else if (folder === 'updates') {
+            if (!isUpdateMail(mail)) return false;
+          } else if (folder === 'inbox') {
+            if (mail.recipientAddress !== currentUser.emailAddress) return false;
+            if (categoryTab === 'promotions' && !isPromoMail(mail)) return false;
+            if (categoryTab === 'social' && !isSocialMail(mail)) return false;
+            if (categoryTab === 'updates' && !isUpdateMail(mail)) return false;
+          }
         }
       }
 
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        return (
-          mail.subject.toLowerCase().includes(q) ||
-          mail.senderAddress.toLowerCase().includes(q) ||
-          mail.textBody.toLowerCase().includes(q)
-        );
+      // Advanced Filter Criteria
+      if (searchFilters.from && searchFilters.from.trim()) {
+        const fromQ = searchFilters.from.trim().toLowerCase();
+        if (!mail.senderAddress.toLowerCase().includes(fromQ)) return false;
       }
+
+      if (searchFilters.to && searchFilters.to.trim()) {
+        const toQ = searchFilters.to.trim().toLowerCase();
+        if (!mail.recipientAddress.toLowerCase().includes(toQ)) return false;
+      }
+
+      if (searchFilters.subject && searchFilters.subject.trim()) {
+        const subjQ = searchFilters.subject.trim().toLowerCase();
+        if (!mail.subject.toLowerCase().includes(subjQ)) return false;
+      }
+
+      if (searchFilters.hasWords && searchFilters.hasWords.trim()) {
+        const wordsQ = searchFilters.hasWords.trim().toLowerCase();
+        const hasMatch = mail.textBody.toLowerCase().includes(wordsQ) || mail.subject.toLowerCase().includes(wordsQ);
+        if (!hasMatch) return false;
+      }
+
+      if (searchFilters.hasAttachment) {
+        if (!mail.attachments || mail.attachments.length === 0) return false;
+      }
+
+      if (searchFilters.isStarred) {
+        if (!starredIds.has(mail.publicId)) return false;
+      }
+
+      if (searchFilters.isUnread) {
+        if (mail.readAt) return false;
+      }
+
+      if (searchFilters.dateRange && searchFilters.dateRange !== 'all') {
+        const mailTime = new Date(mail.createdAt).getTime();
+        const now = Date.now();
+        let maxAgeMs = 0;
+        if (searchFilters.dateRange === '1d') maxAgeMs = 24 * 60 * 60 * 1000;
+        else if (searchFilters.dateRange === '3d') maxAgeMs = 3 * 24 * 60 * 60 * 1000;
+        else if (searchFilters.dateRange === '7d') maxAgeMs = 7 * 24 * 60 * 60 * 1000;
+        else if (searchFilters.dateRange === '30d') maxAgeMs = 30 * 24 * 60 * 60 * 1000;
+        else if (searchFilters.dateRange === '1y') maxAgeMs = 365 * 24 * 60 * 60 * 1000;
+        if (maxAgeMs > 0 && now - mailTime > maxAgeMs) return false;
+      }
+
+      // General Query Search
+      const effectiveQuery = (searchFilters.query || searchQuery).trim().toLowerCase();
+      if (effectiveQuery) {
+        const matchesQuery =
+          mail.subject.toLowerCase().includes(effectiveQuery) ||
+          mail.senderAddress.toLowerCase().includes(effectiveQuery) ||
+          mail.recipientAddress.toLowerCase().includes(effectiveQuery) ||
+          mail.textBody.toLowerCase().includes(effectiveQuery);
+        if (!matchesQuery) return false;
+      }
+
       return true;
     });
-  }, [emails, folder, categoryTab, searchQuery, starredIds, trashIds, currentUser.phone]);
+  }, [emails, folder, categoryTab, searchQuery, searchFilters, starredIds, trashIds, currentUser.phone, currentUser.emailAddress]);
 
   const selectedEmail = useMemo(() => {
     if (!mailId) return null;

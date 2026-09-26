@@ -15,6 +15,8 @@ import {
 } from '../Icons';
 import { AttachmentCard } from './AttachmentCard';
 import { VoicemailPlayer } from './VoicemailPlayer';
+import { useMail } from '../../context/MailContext';
+import { t } from '../../utils/i18n';
 
 interface ReadingPaneProps {
   email: Email;
@@ -129,6 +131,9 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
     email.textBody.toLowerCase().includes('recording') ||
     email.subject.toLowerCase().includes('telecom');
 
+  const { currentUser } = useMail();
+  const lang = currentUser?.language || 'en';
+
   return (
     <main className="gmail-reading-pane" style={styles.container}>
       {/* Top Action Toolbar */}
@@ -136,10 +141,10 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
         <button
           style={styles.closeBtn}
           onClick={onClose}
-          title="Close email preview"
+          title={t('back_to_mail', lang)}
         >
           <IconArrowBack size={16} color="#1F1F1F" />
-          <span style={{ fontSize: 13, fontWeight: 500 }}>Back</span>
+          <span style={{ fontSize: 13, fontWeight: 500 }}>{t('back_to_mail', lang)}</span>
         </button>
 
         <div style={styles.toolbarRight}>
@@ -170,7 +175,7 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
               <button
                 style={styles.toolbarIconBtn}
                 onClick={() => onMoveToBin(email.publicId)}
-                title="Move to Bin"
+                title={t('bin', lang)}
               >
                 <IconTrash size={18} color="#444746" />
               </button>
@@ -178,10 +183,10 @@ export const ReadingPane: React.FC<ReadingPaneProps> = ({
               <button
                 style={styles.replyHeaderBtn}
                 onClick={() => onReply(replyAddress, `Re: ${email.subject}`, email.publicId)}
-                title="Reply to email"
+                title={t('reply', lang)}
               >
                 <IconReply size={14} color="#1F1F1F" />
-                <span>Reply</span>
+                <span>{t('reply', lang)}</span>
               </button>
             </>
           )}

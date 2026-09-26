@@ -19,6 +19,8 @@ import {
   IconInbox,
   IconSync,
 } from '../Icons';
+import { useMail } from '../../context/MailContext';
+import { t } from '../../utils/i18n';
 
 interface EmailListProps {
   emails: Email[];
@@ -51,37 +53,40 @@ export const EmailList: React.FC<EmailListProps> = ({
   isMobile,
   hasSelectedEmail,
 }) => {
+  const { currentUser } = useMail();
+  const lang = currentUser?.language || 'en';
+
   const getFolderTitle = () => {
     switch (folder) {
       case 'bin':
       case 'trash':
-        return 'Bin';
+        return t('bin', lang);
       case 'spam':
-        return 'Spam';
+        return t('spam', lang);
       case 'sent':
-        return 'Sent';
+        return t('sent', lang);
       case 'starred':
-        return 'Starred';
+        return t('starred', lang);
       case 'allmail':
-        return 'All Mail';
+        return t('allmail', lang);
       case 'snoozed':
-        return 'Snoozed';
+        return t('snoozed', lang);
       case 'important':
-        return 'Important';
+        return t('important', lang);
       case 'scheduled':
-        return 'Scheduled';
+        return t('scheduled', lang);
       case 'drafts':
-        return 'Drafts';
+        return t('drafts', lang);
       case 'purchases':
-        return 'Purchases';
+        return t('purchases', lang);
       case 'social':
-        return 'Social';
+        return t('social', lang);
       case 'promotions':
-        return 'Promotions';
+        return t('promotions', lang);
       case 'updates':
-        return 'Updates';
+        return t('updates', lang);
       default:
-        return 'Inbox';
+        return t('inbox', lang);
     }
   };
 
@@ -149,7 +154,7 @@ export const EmailList: React.FC<EmailListProps> = ({
             <button
               style={styles.refreshBtn}
               onClick={onRefresh}
-              title="Refresh mail"
+              title={t('refresh_mail', lang)}
             >
               <span
                 style={{

@@ -11,6 +11,22 @@ export interface User {
   avatarUrl?: string;
   passwordConfigured: boolean;
   accountStatus: 'active' | 'disabled';
+  gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null;
+  dateOfBirth?: string | null;
+  language?: string;
+}
+
+export interface EmailSearchFilters {
+  query: string;
+  from?: string;
+  to?: string;
+  subject?: string;
+  hasWords?: string;
+  hasAttachment?: boolean;
+  isStarred?: boolean;
+  isUnread?: boolean;
+  dateRange?: string; // 'all' | '1d' | '3d' | '7d' | '30d' | '1y'
+  folderScope?: string; // 'current' | 'all' | 'inbox' | 'sent' | 'drafts' | 'scheduled' | 'trash' | 'spam'
 }
 
 export interface Attachment {

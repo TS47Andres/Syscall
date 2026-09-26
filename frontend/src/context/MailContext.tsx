@@ -4,7 +4,7 @@
  * Service: Frontend.
  */
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import type { User, Email, Draft, Attachment } from '../types';
+import type { User, Email, Draft, Attachment, EmailSearchFilters } from '../types';
 import { api } from '../api';
 import type { TabCategory } from '../components/mail/CategoryTabs';
 
@@ -15,6 +15,9 @@ interface MailContextType {
   trashIds: Set<string>;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  searchFilters: EmailSearchFilters;
+  setSearchFilters: (filters: EmailSearchFilters | ((prev: EmailSearchFilters) => EmailSearchFilters)) => void;
+  resetSearchFilters: () => void;
   isDrawerOpen: boolean;
   setIsDrawerOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
   isSidebarCollapsed: boolean;
@@ -41,6 +44,7 @@ interface MailContextType {
   handleRescheduleScheduled: (id: string, scheduledAt: string) => Promise<void>;
   handleUpdateName: (newName: string) => Promise<void>;
   handleUpdatePhoto: (photoUrl: string) => Promise<void>;
+  handleUpdateProfileDetails: (details: { name?: string; gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null; dateOfBirth?: string | null; language?: string }) => Promise<void>;
   handleSignOut: () => void;
 }
 
@@ -65,6 +69,17 @@ export const MailProvider: React.FC<MailProviderProps> = ({ initialUser, onSignO
   const [trashIds, setTrashIds] = useState<Set<string>>(new Set());
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFilters, setSearchFilters] = useState<EmailSearchFilters>({ query: '' });
+
+  const handleSetSearchQuery = useCallback((query: string) => {
+    setSearchQuery(query);
+    setSearchFilters((prev) => ({ ...prev, query }));
+  }, []);
+
+  const resetSearchFilters = useCallback(() => {
+    setSearchQuery('');
+    setSearchFilters({ query: '' });
+  }, []);
   const [categoryTab, setCategoryTab] = useState<TabCategory>('all');
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -116,8 +131,18 @@ export const MailProvider: React.FC<MailProviderProps> = ({ initialUser, onSignO
 
   useEffect(() => {
     let cancelled = false;
+    const cachedLang = typeof window !== 'undefined' ? localStorage.getItem('syscall_language') : null;
     void api.getProfile().then((profile) => {
-      if (!cancelled) setCurrentUser((user) => ({ ...user, name: profile.name || user.name, avatarUrl: profile.avatarUrl || undefined }));
+      if (!cancelled) {
+        setCurrentUser((user) => ({
+          ...user,
+          name: profile.name || user.name,
+          avatarUrl: profile.avatarUrl || undefined,
+          gender: profile.gender ?? user.gender,
+          dateOfBirth: profile.dateOfBirth ?? user.dateOfBirth,
+          language: profile.language || cachedLang || user.language || 'en',
+        }));
+      }
     }).catch((reason: unknown) => {
       if (!cancelled) setLoadError(reason instanceof Error ? reason.message : 'Could not load profile.');
     });
@@ -183,5 +208,70 @@ export const MailProvider: React.FC<MailProviderProps> = ({ initialUser, onSignO
     catch (reason) { const message = reason instanceof Error ? reason.message : 'Could not update profile photo.'; setLoadError(message); throw new Error(message); }
   }, []);
 
-  return <MailContext.Provider value={{ currentUser, emails, starredIds, trashIds, searchQuery, setSearchQuery, isDrawerOpen, setIsDrawerOpen, isSidebarCollapsed, setIsSidebarCollapsed, isComposeOpen, setIsComposeOpen, composePrefill, setComposePrefill, categoryTab, setCategoryTab, refreshing, loadError, loadMail, handleMoveToBin, handleRestoreFromBin, handlePermanentDelete, handleEmptyBin, handleToggleStar, handleToggleSpam, handleSendMail, handleSaveDraft, handleScheduleMail, handleCancelScheduled, handleRescheduleScheduled, handleUpdateName, handleUpdatePhoto, handleSignOut: onSignOut }}>{children}</MailContext.Provider>;
+  // Saves personal details (gender, date of birth, language, name) through authenticated profile API.
+  const handleUpdateProfileDetails = useCallback(async (details: { name?: string; gender?: 'male' | 'female' | 'other' | 'prefer_not_to_say' | null; dateOfBirth?: string | null; language?: string }): Promise<void> => {
+    try {
+      await api.updateProfile(details);
+      setCurrentUser((user) => ({
+        ...user,
+        ...(details.name !== undefined ? { name: details.name } : {}),
+        ...(details.gender !== undefined ? { gender: details.gender } : {}),
+        ...(details.dateOfBirth !== undefined ? { dateOfBirth: details.dateOfBirth } : {}),
+        ...(details.language !== undefined ? { language: details.language } : {}),
+      }));
+      if (details.language && typeof window !== 'undefined') {
+        localStorage.setItem('syscall_language', details.language);
+      }
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : 'Could not update profile details.';
+      setLoadError(message);
+      throw new Error(message);
+    }
+  }, []);
+
+  return (
+    <MailContext.Provider
+      value={{
+        currentUser,
+        emails,
+        starredIds,
+        trashIds,
+        searchQuery,
+        setSearchQuery: handleSetSearchQuery,
+        searchFilters,
+        setSearchFilters,
+        resetSearchFilters,
+        isDrawerOpen,
+        setIsDrawerOpen,
+        isSidebarCollapsed,
+        setIsSidebarCollapsed,
+        isComposeOpen,
+        setIsComposeOpen,
+        composePrefill,
+        setComposePrefill,
+        categoryTab,
+        setCategoryTab,
+        refreshing,
+        loadError,
+        loadMail,
+        handleMoveToBin,
+        handleRestoreFromBin,
+        handlePermanentDelete,
+        handleEmptyBin,
+        handleToggleStar,
+        handleToggleSpam,
+        handleSendMail,
+        handleSaveDraft,
+        handleScheduleMail,
+        handleCancelScheduled,
+        handleRescheduleScheduled,
+        handleUpdateName,
+        handleUpdatePhoto,
+        handleUpdateProfileDetails,
+        handleSignOut: onSignOut,
+      }}
+    >
+      {children}
+    </MailContext.Provider>
+  );
 };

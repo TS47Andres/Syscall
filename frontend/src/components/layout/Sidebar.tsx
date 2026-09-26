@@ -144,49 +144,49 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       id: 'inbox',
       label: 'Inbox',
-      icon: (act) => <IconInbox size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconInbox size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !m.isSpam && !m.readAt && !trashIds.has(m.publicId)).length,
     },
     {
       id: 'sent',
       label: 'Sent',
-      icon: (act) => <IconSent size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconSent size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => m.senderAddress.includes(userPhone) && !trashIds.has(m.publicId)).length,
     },
     {
       id: 'allmail',
       label: 'All Mail',
-      icon: (act) => <IconAllMail size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconAllMail size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && !m.isSpam).length,
     },
     {
       id: 'starred',
       label: 'Starred',
-      icon: (act) => <IconStar size={isCollapsed ? 20 : 18} filled={act} color={act ? '#B06000' : '#444746'} />,
+      icon: (act) => <IconStar size={18} filled={act} color={act ? '#B06000' : '#444746'} />,
       count: emails.filter((m) => starredIds.has(m.publicId) && !trashIds.has(m.publicId)).length,
     },
     {
       id: 'snoozed',
       label: 'Snoozed',
-      icon: (act) => <IconSnoozed size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconSnoozed size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: 0,
     },
     {
       id: 'important',
       label: 'Important',
-      icon: (act) => <IconImportant size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconImportant size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isImportantMail(m) && !m.readAt).length,
     },
     {
       id: 'scheduled',
       label: 'Scheduled',
-      icon: (act) => <IconScheduled size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconScheduled size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((mail) => mail.deliveryStatus === 'scheduled').length,
     },
     {
       id: 'drafts',
       label: 'Drafts',
-      icon: (act) => <IconDrafts size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconDrafts size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((mail) => mail.isDraft).length,
     },
   ];
@@ -200,25 +200,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       id: 'promotions',
       label: 'Promotions',
-      icon: (act) => <IconPromotions size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconPromotions size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isPromoMail(m) && !m.readAt).length,
     },
     {
       id: 'social',
       label: 'Social',
-      icon: (act) => <IconSocial size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconSocial size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isSocialMail(m) && !m.readAt).length,
     },
     {
       id: 'purchases',
       label: 'Purchases',
-      icon: (act) => <IconPurchases size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconPurchases size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isPurchaseMail(m) && !m.readAt).length,
     },
     {
       id: 'updates',
       label: 'Updates',
-      icon: (act) => <IconUpdates size={isCollapsed ? 20 : 18} color={act ? '#0B57D0' : '#444746'} />,
+      icon: (act) => <IconUpdates size={18} color={act ? '#0B57D0' : '#444746'} />,
       count: emails.filter((m) => !trashIds.has(m.publicId) && isUpdateMail(m) && !m.readAt).length,
     },
   ];
@@ -232,13 +232,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       id: 'spam',
       label: 'Spam',
-      icon: (act) => <IconSpam size={isCollapsed ? 20 : 18} color={act ? '#BA1A1A' : '#444746'} />,
+      icon: (act) => <IconSpam size={18} color={act ? '#BA1A1A' : '#444746'} />,
       count: emails.filter((m) => m.isSpam && !trashIds.has(m.publicId)).length,
     },
     {
       id: 'bin',
       label: 'Bin',
-      icon: (act) => <IconTrash size={isCollapsed ? 20 : 18} color={act ? '#BA1A1A' : '#444746'} />,
+      icon: (act) => <IconTrash size={18} color={act ? '#BA1A1A' : '#444746'} />,
       count: trashIds.size,
     },
   ];
@@ -258,11 +258,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           fontWeight: isActive ? 700 : 500,
           justifyContent: isCollapsed ? 'center' : 'flex-start',
           padding: isCollapsed ? '0' : '0 16px 0 20px',
-          height: isCollapsed ? '38px' : '34px',
-          minHeight: isCollapsed ? '38px' : '34px',
+          height: '34px',
+          minHeight: '34px',
           width: isCollapsed ? '46px' : '100%',
           borderRadius: isCollapsed ? '19px' : '0 17px 17px 0',
-          margin: isCollapsed ? '0 auto 3px' : '0 0 1px 0',
+          margin: isCollapsed ? '0 auto 1px' : '0 0 1px 0',
         }}
       >
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -310,7 +310,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             style={{
               height: '1px',
               backgroundColor: '#E0E2EC',
-              margin: isCollapsed ? '6px auto' : '8px 16px',
+              margin: isCollapsed ? '8px auto' : '8px 16px',
               width: isCollapsed ? '32px' : 'calc(100% - 32px)',
               flexShrink: 0,
             }}
@@ -324,7 +324,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             style={{
               height: '1px',
               backgroundColor: '#E0E2EC',
-              margin: isCollapsed ? '6px auto' : '8px 16px',
+              margin: isCollapsed ? '8px auto' : '8px 16px',
               width: isCollapsed ? '32px' : 'calc(100% - 32px)',
               flexShrink: 0,
             }}

@@ -828,10 +828,9 @@ input, textarea, select {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 14px;
-  background-color: #F8FAFD;
-  border: 1px solid #D3E3FD;
-  border-radius: 12px;
+  padding: 6px 4px;
+  background-color: transparent;
+  border: none;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   margin-top: 4px;
@@ -839,14 +838,13 @@ input, textarea, select {
 }
 
 .compose-schedule-bar:hover {
-  background-color: #F0F4FC;
-  border-color: #B5D2FD;
-  box-shadow: 0 1px 4px rgba(11, 87, 208, 0.08);
+  background-color: transparent;
+  box-shadow: none;
 }
 
 .compose-schedule-bar.is-scheduled {
-  background-color: #EDF4FE;
-  border-color: #A8C7FA;
+  background-color: transparent;
+  border: none;
 }
 
 .compose-schedule-left {
@@ -861,10 +859,10 @@ input, textarea, select {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background-color: #EAF1FB;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background-color: transparent;
   flex-shrink: 0;
   transition: transform 0.15s ease;
 }
@@ -874,7 +872,7 @@ input, textarea, select {
 }
 
 .compose-schedule-bar.is-scheduled .compose-schedule-badge {
-  background-color: #D3E3FD;
+  background-color: transparent;
 }
 
 .compose-schedule-meta {

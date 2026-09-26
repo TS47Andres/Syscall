@@ -1223,3 +1223,16 @@ input, textarea, select {
   background-color: #EAF1FB;
   border-color: #C2E7FF;
 }
+
+/* ==========================================================================
+   Auth Showcase Carousel Progress Pill Animation
+   ========================================================================== */
+@keyframes carouselPillFill {
+  0% {
+    width: 0%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+

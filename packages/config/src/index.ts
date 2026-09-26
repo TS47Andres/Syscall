@@ -25,6 +25,7 @@ const environmentSchema = z.object({
   TELNYX_CONNECTION_ID: z.string().optional().or(z.literal('')),
   TELNYX_MESSAGING_PROFILE_ID: z.string().optional().or(z.literal('')),
   VOICE_AGENT_API_TOKEN: z.string().optional().or(z.literal('')),
+  SARVAM_API_KEY: z.string().optional().or(z.literal('')),
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: z.coerce.number().int().positive().default(2525),
   SMTP_MAX_MESSAGE_SIZE_MB: z.coerce.number().positive().default(25),

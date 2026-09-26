@@ -9,6 +9,7 @@ import {
 
 interface EmailRowProps {
   email: Email;
+  folder: string;
   isSelected: boolean;
   isStarred: boolean;
   onSelect: (email: Email) => void;
@@ -17,12 +18,14 @@ interface EmailRowProps {
 
 export const EmailRow: React.FC<EmailRowProps> = ({
   email,
+  folder,
   isSelected,
   isStarred,
   onSelect,
   onToggleStar,
 }) => {
   const isUnread = !email.readAt;
+  const displayedAddress = folder === 'sent' ? email.recipientAddress : email.senderAddress;
 
   const formatPhone = (addr: string) => {
     const raw = addr.replace(/\D/g, '').slice(-10);
@@ -62,19 +65,19 @@ export const EmailRow: React.FC<EmailRowProps> = ({
       <div
         className="gmail-avatar"
         style={{
-          backgroundColor: getAvatarBg(email.senderAddress),
+          backgroundColor: getAvatarBg(displayedAddress),
           width: 32,
           height: 32,
           fontSize: 12,
         }}
       >
-        {email.senderAddress.slice(0, 2).toUpperCase()}
+        {displayedAddress.slice(0, 2).toUpperCase()}
       </div>
 
       {/* Sender Name / Phone */}
-      <div style={styles.senderCol} title={email.senderAddress}>
+      <div style={styles.senderCol} title={displayedAddress}>
         <span style={{ fontSize: 13.5, color: '#1F1F1F' }}>
-          {formatPhone(email.senderAddress)}
+          {formatPhone(displayedAddress)}
         </span>
       </div>
 

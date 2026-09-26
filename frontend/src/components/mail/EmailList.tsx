@@ -182,6 +182,7 @@ export const EmailList: React.FC<EmailListProps> = ({
             <EmailRow
               key={email.publicId}
               email={email}
+              folder={folder}
               isSelected={email.publicId === selectedEmailId}
               isStarred={starredIds.has(email.publicId)}
               onSelect={onSelectEmail}

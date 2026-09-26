@@ -89,6 +89,11 @@ class SyscallApi {
     return this.request('/api/auth/password/initial-set', { method: 'POST', body: JSON.stringify({ password }) });
   }
 
+  // Generates or revises an email using the current draft as model context.
+  async generateEmailDraft(input: { prompt: string; subject: string; textBody: string }): Promise<{ subject: string; textBody: string }> {
+    return this.request('/api/ai/compose', { method: 'POST', body: JSON.stringify(input) });
+  }
+
   // Requests a password reset without exposing account existence to the browser.
   async requestPasswordReset(phone: string): Promise<{ status: string }> {
     return this.request('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ phone }) });

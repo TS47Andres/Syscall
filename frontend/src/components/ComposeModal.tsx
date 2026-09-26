@@ -11,6 +11,7 @@ import {
   IconSent,
   IconAttach,
   IconScheduled,
+  IconSarvamAI,
 } from './Icons';
 import { ModernSchedulePicker } from './compose/ModernSchedulePicker';
 import { api } from '../api';
@@ -34,6 +35,8 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
   const [toInput, setToInput] = useState<string>(initialTo);
   const [subject, setSubject] = useState<string>(initialSubject);
   const [body, setBody] = useState<string>(initialBody);
+  const [aiPrompt, setAiPrompt] = useState<string>('');
+  const [generatingEmail, setGeneratingEmail] = useState<boolean>(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [attachmentsChanged, setAttachmentsChanged] = useState(false);
   const [scheduledAt, setScheduledAt] = useState('');
@@ -55,6 +58,25 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
   const removeAttachment = (indexToRemove: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== indexToRemove));
     setAttachmentsChanged(true);
+  };
+
+  // Sends the current prompt and draft content so Sarvam can write or revise both fields.
+  const handleGenerateEmail = async () => {
+    if (!aiPrompt.trim()) {
+      setErrorMsg('Describe the email you want to write or how you want to update it.');
+      return;
+    }
+    setGeneratingEmail(true);
+    setErrorMsg(null);
+    try {
+      const generated = await api.generateEmailDraft({ prompt: aiPrompt.trim(), subject, textBody: body });
+      setSubject(generated.subject);
+      setBody(generated.textBody);
+    } catch (reason) {
+      setErrorMsg(reason instanceof Error ? reason.message : 'Could not generate the email.');
+    } finally {
+      setGeneratingEmail(false);
+    }
   };
 
   // Floating window movable across entire page
@@ -261,7 +283,43 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
                 placeholder="Brief summary of your message"
                 style={styles.fieldInput}
                 required
+                disabled={generatingEmail}
               />
+            </div>
+
+            {/* One-line AI prompt with the Sarvam action at its trailing edge. */}
+            <div style={styles.aiPromptRow}>
+              <input
+                type="text"
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void handleGenerateEmail();
+                  }
+                }}
+                placeholder="Describe your message"
+                aria-label="Describe your message"
+                maxLength={3000}
+                style={styles.aiPromptInput}
+                disabled={generatingEmail || sending}
+              />
+              <button
+                type="button"
+                onClick={() => void handleGenerateEmail()}
+                title={generatingEmail ? 'Writing with Sarvam 105B' : 'Write or update subject and message with Sarvam 105B'}
+                aria-label={generatingEmail ? 'Writing with Sarvam 105B' : 'Write or update with Sarvam 105B'}
+                aria-busy={generatingEmail}
+                style={{
+                  ...styles.aiComposeButton,
+                  opacity: generatingEmail || sending || !aiPrompt.trim() ? 0.55 : 1,
+                  cursor: generatingEmail || sending || !aiPrompt.trim() ? 'not-allowed' : 'pointer',
+                }}
+                disabled={generatingEmail || sending || !aiPrompt.trim()}
+              >
+                <IconSarvamAI size={20} />
+              </button>
             </div>
 
             {/* Body: Scrollable section with turned-off scrollbar visibility and no extending resize */}
@@ -273,10 +331,11 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
                 style={styles.bodyTextarea}
                 className="no-scrollbar"
                 rows={7}
+                disabled={generatingEmail}
               />
             </div>
 
-            {/* Compose Toolbar: Attach Files & Schedule Send */}
+            {/* Attachments and scheduling follow the message content. */}
             <div style={styles.composeToolbarRow}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <input
@@ -327,7 +386,6 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
             {/* Attachment Chips Display */}
             {(attachments.length > 0 || (!attachmentsChanged && initialAttachments.length > 0)) && (
               <div className="compose-files-grid">
-                {/* Draft saved files (if unchanged) */}
                 {!attachmentsChanged &&
                   initialAttachments.map((file, index) => (
                     <button
@@ -345,16 +403,11 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
                     </button>
                   ))}
 
-                {/* Newly selected files */}
                 {attachments.map((file, index) => (
                   <div key={`new-file-${index}`} className="compose-file-chip">
                     <IconAttach size={13} color="#0B57D0" />
-                    <span className="compose-file-chip-name" title={file.name}>
-                      {file.name}
-                    </span>
-                    <span className="compose-file-chip-size">
-                      {(file.size / 1024).toFixed(1)} KB
-                    </span>
+                    <span className="compose-file-chip-name" title={file.name}>{file.name}</span>
+                    <span className="compose-file-chip-size">{(file.size / 1024).toFixed(1)} KB</span>
                     <button
                       type="button"
                       onClick={() => removeAttachment(index)}
@@ -378,7 +431,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
                   setShowSchedulePicker(false);
                 }}
                 autoOpen={!scheduledAt}
-                disabled={sending}
+                disabled={sending || generatingEmail}
               />
             )}
 
@@ -392,7 +445,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
                   type="button"
                   onClick={() => void handleSaveDraft()}
                   style={styles.cancelBtn}
-                  disabled={sending}
+                  disabled={sending || generatingEmail}
                 >
                   Save draft
                 </button>
@@ -405,7 +458,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
                 </span>
               </div>
 
-              <button type="submit" disabled={sending} style={styles.sendBtn}>
+              <button type="submit" disabled={sending || generatingEmail} style={styles.sendBtn}>
                 {scheduledAt ? (
                   <IconScheduled size={15} color="#FFFFFF" />
                 ) : (
@@ -550,6 +603,46 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundColor: '#EAF1FB',
     padding: '2px 6px',
     borderRadius: '4px',
+  },
+  aiPromptRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    height: '40px',
+    minHeight: '40px',
+    maxHeight: '40px',
+    flexShrink: 0,
+    borderBottom: '1px solid #E0E2EC',
+    overflow: 'hidden',
+  },
+  aiPromptInput: {
+    flex: 1,
+    minWidth: 0,
+    height: '36px',
+    minHeight: '36px',
+    maxHeight: '36px',
+    border: 'none',
+    padding: '0 4px 0 0',
+    background: 'transparent',
+    color: '#1F1F1F',
+    fontFamily: 'inherit',
+    fontSize: '14px',
+    resize: 'none',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  aiComposeButton: {
+    width: '32px',
+    height: '32px',
+    flexShrink: 0,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    borderRadius: '50%',
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
   },
   bodyWrapper: {
     border: '1px solid #E0E2EC',

@@ -13,7 +13,6 @@ import {
   IconEye,
   IconEyeOff,
   IconAlert,
-  IconPhone,
 } from '../Icons';
 import { PasswordStrengthMeter, getPasswordStrength } from './PasswordStrengthMeter';
 import { OtpInputGroup } from './OtpInputGroup';
@@ -43,16 +42,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
   // Form State
   const [fullName, setFullName] = useState<string>('');
-  const [phoneInput, setPhoneInput] = useState<string>('7682001264');
+  const [phoneInput, setPhoneInput] = useState<string>('');
   const [password, setPassword] = useState<string>('');
-  const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState<boolean>(false);
   const [signInWithOtp, setSignInWithOtp] = useState<boolean>(false);
 
   // OTP State (compact 6 boxes)
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', '']);
   const [resetAfterOtp, setResetAfterOtp] = useState<boolean>(false);
+  const [initialPasswordSetup, setInitialPasswordSetup] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState<number>(0);
@@ -84,6 +82,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setMode('create');
     setSubStep('form');
     setErrorMessage(null);
+    setResetAfterOtp(false);
+    setInitialPasswordSetup(false);
     if (onNavigateMode) onNavigateMode('create');
   };
 
@@ -91,53 +91,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setMode('signin');
     setSubStep('form');
     setErrorMessage(null);
+    setResetAfterOtp(false);
+    setInitialPasswordSetup(false);
     if (onNavigateMode) onNavigateMode('signin');
   };
 
-  // Submit Create Account Form -> Send OTP to verify phone
-  const handleCreateAccountNext = async (e?: React.FormEvent) => {
+  // Requests the IVR call that creates the account after voice confirmation.
+  const handleRequestVoiceSetup = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMessage(null);
 
-    if (!fullName.trim()) {
+    if (fullName.trim().length < 2) {
       setErrorMessage('Please enter your full name');
       return;
     }
     if (raw10.length !== 10) {
       setErrorMessage('Please enter a valid 10-digit Indian phone number');
-      return;
-    }
-    if (password.length < 6) {
-      setErrorMessage('Password must be at least 6 characters');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setErrorMessage('Passwords do not match');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await api.requestOtp(`+91${raw10}`);
-      setResendCooldown(res.cooldownSeconds || 60);
-      setOtpDigits(['', '', '', '', '', '']);
-      setSubStep('otp');
-    } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to send verification SMS');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Optional voice-assisted onboarding request
-  const handleRequestVoiceSetup = async () => {
-    setErrorMessage(null);
-    if (fullName.trim().length < 2) {
-      setErrorMessage('Please enter your full name before requesting a call');
-      return;
-    }
-    if (raw10.length !== 10) {
-      setErrorMessage('Please enter a valid 10-digit mobile number');
       return;
     }
     setLoading(true);
@@ -152,8 +121,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   };
 
   // Sends an OTP to an existing account for sign-in or password reset
-  const requestOtp = async (isPasswordReset = false): Promise<void> => {
+  const requestOtp = async (isPasswordReset = false, isInitialPasswordSetup = false): Promise<void> => {
     setErrorMessage(null);
+    setResetAfterOtp(isPasswordReset);
+    setInitialPasswordSetup(isInitialPasswordSetup);
     if (raw10.length !== 10) {
       setErrorMessage('Please enter a valid 10-digit Indian mobile number');
       return;
@@ -167,7 +138,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       }
       setResendCooldown(result.cooldownSeconds ?? 60);
       setOtpDigits(['', '', '', '', '', '']);
-      setResetAfterOtp(isPasswordReset);
       setSubStep('otp');
       if (isPasswordReset) {
         setErrorMessage('If an account exists, a verification code has been sent by SMS.');
@@ -177,6 +147,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleStartPasswordSetup = async () => {
+    setErrorMessage(null);
+    setSignInWithOtp(true);
+    await requestOtp(true, true);
   };
 
   // Submit Sign In Form (Password or OTP)
@@ -238,24 +214,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         return;
       }
 
-      // If user came from Create Account and specified a password, set it
-      if (mode === 'create' && password) {
-        try {
-          await api.setPassword(password);
-        } catch {
-          // Password set best-effort
-        }
-      }
-
-      // If user provided a name during create, update it
-      if (mode === 'create' && fullName.trim()) {
-        try {
-          await api.updateProfile({ name: fullName.trim() });
-        } catch {
-          // Name update best-effort
-        }
-      }
-
       if (res.user) {
         const user: User = {
           ...res.user,
@@ -292,6 +250,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setLoading(true);
     setErrorMessage(null);
     try {
+      if (initialPasswordSetup) {
+        const initialResult = await api.setInitialPassword(password);
+        setInitialPasswordSetup(false);
+        onSuccess(initialResult.user);
+        return;
+      }
       const result = await api.setPassword(password);
       onSuccess(result.user);
     } catch (reason: any) {
@@ -369,7 +333,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               ) : mode === 'signin' && subStep === 'form' ? (
                 <p style={styles.googleSubtitle}>to continue to Syscall Mail</p>
               ) : mode === 'create' && subStep === 'form' ? (
-                <p style={styles.googleSubtitle}>to continue to Syscall Mail</p>
+                <p style={styles.googleSubtitle}>Create your account with a quick phone call</p>
               ) : null}
 
               {subStep === 'otp' && (
@@ -410,7 +374,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             {/* 1. CREATE ACCOUNT FORM */}
             {mode === 'create' && subStep === 'form' && (
-              <form onSubmit={handleCreateAccountNext} style={styles.formStack}>
+              <form onSubmit={handleRequestVoiceSetup} style={styles.formStack}>
                 {/* Full Name */}
                 <div style={styles.inputWrapper}>
                   <label style={styles.fieldLabel}>Full name</label>
@@ -444,59 +408,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       style={styles.phoneInputField}
                     />
                   </div>
-                  {raw10.length === 10 && (
-                    <span style={styles.phoneMailPreview}>
-                      Your Syscall address: <strong>{raw10}@niti</strong>
-                    </span>
-                  )}
-                </div>
-
-                {/* Password & Confirm Password */}
-                <div style={styles.inputWrapper}>
-                  <label style={styles.fieldLabel}>Password</label>
-                  <div style={styles.materialOutlineField}>
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="Create a secure password"
-                      style={{ ...styles.phoneInputField, paddingLeft: 14 }}
-                    />
-                    <button
-                      type="button"
-                      style={styles.eyeToggleBtn}
-                      onClick={() => setShowPassword(!showPassword)}
-                      title={showPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showPassword ? <IconEyeOff size={18} color="#444746" /> : <IconEye size={18} color="#444746" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Interactive Password Strength Meter */}
-                {password.length > 0 && (
-                  <PasswordStrengthMeter strength={getPasswordStrength(password)} />
-                )}
-
-                <div style={styles.inputWrapper}>
-                  <label style={styles.fieldLabel}>Confirm password</label>
-                  <div style={styles.materialOutlineField}>
-                    <input
-                      type={showConfirmPassword ? 'text' : 'password'}
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="Re-enter password"
-                      style={{ ...styles.phoneInputField, paddingLeft: 14 }}
-                    />
-                    <button
-                      type="button"
-                      style={styles.eyeToggleBtn}
-                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      title={showConfirmPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showConfirmPassword ? <IconEyeOff size={18} color="#444746" /> : <IconEye size={18} color="#444746" />}
-                    </button>
-                  </div>
                 </div>
 
                 {/* Bottom Actions */}
@@ -517,21 +428,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                     }}
                     disabled={loading}
                   >
-                    {loading ? 'Sending code...' : 'Next'}
-                  </button>
-                </div>
-
-                {/* Voice Onboarding Alternative */}
-                <div style={styles.voiceSetupRow}>
-                  <button
-                    type="button"
-                    style={styles.voiceSetupBtn}
-                    onClick={handleRequestVoiceSetup}
-                    disabled={loading}
-                    title="Have our voice assistant call your phone to verify and create your account"
-                  >
-                    <IconPhone size={14} color="#0B57D0" />
-                    <span>Or request an automated voice setup call</span>
+                    {loading ? 'Requesting call...' : 'Request a call'}
                   </button>
                 </div>
               </form>
@@ -603,7 +500,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                      <button
+                        type="button"
+                        style={styles.textActionBtnSmall}
+                        onClick={() => void handleStartPasswordSetup()}
+                        disabled={loading}
+                      >
+                        New User? Set Password
+                      </button>
                       <button
                         type="button"
                         style={styles.textActionBtnSmall}
@@ -688,7 +593,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 {/* Inline OTP Error: Clean, no background, below input fields and above resend code button */}
                 {errorMessage && (
                   <div style={styles.otpInlineError} className="animate-fade-in">
-                    <IconAlert size={15} color="#D93025" />
+                    {!errorMessage.startsWith('If an account exists,') && <IconAlert size={15} color="#D93025" />}
                     <span>{errorMessage}</span>
                   </div>
                 )}
@@ -814,7 +719,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             {subStep === 'call-requested' && (
               <div style={styles.formStack}>
                 <div style={styles.otpNoticeBox}>
-                  Your automated onboarding call has been requested. When your phone rings, the voice assistant will confirm your name <strong>"{fullName.trim()}"</strong> and set up your account.
+                  Your automated onboarding call has been requested. When your phone rings, the voice assistant will confirm your name <strong>"{fullName.trim()}"</strong> and complete your account creation. You can set your password later from the Sign in page.
                 </div>
                 <div style={styles.bottomActions}>
                   <button type="button" onClick={() => handleSwitchToSignIn()} style={styles.textActionBtn}>
@@ -1049,11 +954,6 @@ const styles: Record<string, React.CSSProperties> = {
     border: 'none',
     cursor: 'pointer',
   },
-  phoneMailPreview: {
-    fontSize: '12.5px',
-    color: '#0B57D0',
-    marginTop: '2px',
-  },
   textActionBtn: {
     background: 'none',
     border: 'none',
@@ -1117,25 +1017,6 @@ const styles: Record<string, React.CSSProperties> = {
     border: 'none',
     boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
     transition: 'all 0.15s ease',
-  },
-  voiceSetupRow: {
-    display: 'flex',
-    justifyContent: 'center',
-    marginTop: '6px',
-  },
-  voiceSetupBtn: {
-    background: 'none',
-    border: 'none',
-    color: '#0B57D0',
-    fontSize: '12.5px',
-    fontWeight: 500,
-    cursor: 'pointer',
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '6px 10px',
-    borderRadius: '6px',
-    transition: 'background-color 0.15s ease',
   },
   resendRow: {
     display: 'flex',

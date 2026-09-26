@@ -18,7 +18,6 @@ export function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [showSplash, setShowSplash] = useState<boolean>(false);
-  const [pendingUser, setPendingUser] = useState<User | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,14 +35,12 @@ export function App() {
   }, []);
 
   const handleAuthSuccess = (authenticatedUser: User) => {
-    setPendingUser(authenticatedUser);
+    // Mount the authenticated routes beneath the splash so they never redirect back to login.
+    setUser(authenticatedUser);
     setShowSplash(true);
   };
 
   const handleSplashFinish = () => {
-    if (pendingUser) {
-      setUser(pendingUser);
-    }
     setShowSplash(false);
   };
 

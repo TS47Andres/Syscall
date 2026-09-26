@@ -20,40 +20,40 @@ interface FlyingMail {
   scale: number;
 }
 
-// 16 envelopes positioned around 360 degrees flying into the central logo from farther out
-const FLYING_MAILS: FlyingMail[] = [
-  { id: 1, angleDeg: 0, distance: 700, delayMs: 0, durationMs: 980, scale: 1 },
-  { id: 2, angleDeg: 25, distance: 760, delayMs: 120, durationMs: 940, scale: 0.9 },
-  { id: 3, angleDeg: 50, distance: 680, delayMs: 240, durationMs: 920, scale: 1.1 },
-  { id: 4, angleDeg: 90, distance: 640, delayMs: 60, durationMs: 960, scale: 1 },
-  { id: 5, angleDeg: 115, distance: 740, delayMs: 180, durationMs: 930, scale: 0.95 },
-  { id: 6, angleDeg: 145, distance: 690, delayMs: 300, durationMs: 900, scale: 1.05 },
-  { id: 7, angleDeg: 180, distance: 730, delayMs: 40, durationMs: 990, scale: 1 },
-  { id: 8, angleDeg: 205, distance: 710, delayMs: 160, durationMs: 940, scale: 0.9 },
-  { id: 9, angleDeg: 235, distance: 770, delayMs: 280, durationMs: 910, scale: 1.1 },
-  { id: 10, angleDeg: 270, distance: 640, delayMs: 80, durationMs: 970, scale: 1 },
-  { id: 11, angleDeg: 295, distance: 750, delayMs: 200, durationMs: 930, scale: 0.95 },
-  { id: 12, angleDeg: 330, distance: 720, delayMs: 320, durationMs: 900, scale: 1.05 },
-  // Second wave from outer horizons
-  { id: 13, angleDeg: 12, distance: 840, delayMs: 360, durationMs: 890, scale: 0.85 },
-  { id: 14, angleDeg: 102, distance: 800, delayMs: 440, durationMs: 870, scale: 0.85 },
-  { id: 15, angleDeg: 192, distance: 850, delayMs: 390, durationMs: 880, scale: 0.85 },
-  { id: 16, angleDeg: 282, distance: 810, delayMs: 430, durationMs: 890, scale: 0.85 },
-];
+const SPOKE_COUNT = 24;
+const MAILS_PER_SPOKE = 5;
+const MAIL_ROW_SPACING = 48;
+const MAIL_SPEED_PX_PER_MS = 0.25;
+const SPOKES = Array.from({ length: SPOKE_COUNT }, (_, spoke) => ({
+  id: spoke,
+  angleDeg: -90 + (360 / SPOKE_COUNT) * spoke,
+}));
+
+// Five envelopes travel along each of 24 evenly spaced spokes and disappear into the logo.
+const FLYING_MAILS: FlyingMail[] = SPOKES.flatMap(({ id: spoke, angleDeg }) =>
+  Array.from({ length: MAILS_PER_SPOKE }, (_, mailIndex) => ({
+    id: spoke * MAILS_PER_SPOKE + mailIndex,
+    angleDeg,
+    distance: 220 + mailIndex * MAIL_ROW_SPACING,
+    delayMs: 0,
+    durationMs: Math.round((220 + mailIndex * MAIL_ROW_SPACING) / MAIL_SPEED_PX_PER_MS),
+    scale: 0.76 + (mailIndex % 2) * 0.08,
+  }))
+);
 
 export const LoginSplashScreen: React.FC<LoginSplashScreenProps> = ({ onFinish }) => {
   const [fadingOut, setFadingOut] = useState(false);
 
   useEffect(() => {
-    // Begin smooth fade-out at 1350ms
+    // Let the final envelopes reach and disappear into the logo before fading the splash.
     const fadeTimer = setTimeout(() => {
       setFadingOut(true);
-    }, 1350);
+    }, 1950);
 
-    // Conclude splash and mount inbox at 1650ms (within 1 to 2 seconds)
+    // Conclude splash and mount inbox after the logo absorption animation.
     const finishTimer = setTimeout(() => {
       onFinish();
-    }, 1650);
+    }, 2250);
 
     return () => {
       clearTimeout(fadeTimer);
@@ -70,7 +70,7 @@ export const LoginSplashScreen: React.FC<LoginSplashScreenProps> = ({ onFinish }
       }}
     >
       <div style={styles.centerStage}>
-        {/* Converging Mail Envelopes from all directions */}
+        {/* Five envelopes travel in along each invisible spoke and enter the logo */}
         {FLYING_MAILS.map((mail) => {
           const rad = (mail.angleDeg * Math.PI) / 180;
           const startX = Math.round(Math.cos(rad) * mail.distance);
@@ -91,8 +91,8 @@ export const LoginSplashScreen: React.FC<LoginSplashScreenProps> = ({ onFinish }
               }
             >
               <svg
-                width="34"
-                height="26"
+                width="28"
+                height="22"
                 viewBox="0 0 24 24"
                 fill="#EDF4FE"
                 stroke="#0B57D0"
@@ -109,7 +109,7 @@ export const LoginSplashScreen: React.FC<LoginSplashScreenProps> = ({ onFinish }
         })}
 
         {/* Central Logo */}
-        <div style={styles.logoAnchor} className="splash-logo-pulse">
+        <div style={styles.logoAnchor} className="splash-logo-absorb">
           <SyscallLogo size={88} />
         </div>
 
@@ -146,7 +146,11 @@ const styles: Record<string, React.CSSProperties> = {
     height: '100%',
   },
   logoAnchor: {
-    position: 'relative',
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginTop: '-60px',
+    marginLeft: '-60px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -159,12 +163,16 @@ const styles: Record<string, React.CSSProperties> = {
     filter: 'drop-shadow(0 2px 6px rgba(11, 87, 208, 0.2))',
   },
   brandTitleWrap: {
+    position: 'absolute',
+    top: 'calc(50% + 80px)',
+    left: '50%',
+    transform: 'translateX(-50%)',
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
     gap: '6px',
-    marginTop: '20px',
+    marginTop: 0,
     zIndex: 10,
   },
   brandTitle: {

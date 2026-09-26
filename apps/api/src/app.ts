@@ -290,6 +290,15 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     return { user: publicUser(user) };
   });
 
+  app.post('/api/auth/password/initial-set', async (request) => {
+    const user = await requireUser(request);
+    const body = z.object({ password: passwordSchema }).parse(request.body);
+    if (user.passwordConfigured || user.passwordHash) throw httpError(409, 'A password is already set for this account. Use Forgot password to change it.');
+    user.passwordHash = await hashPassword(body.password); user.passwordConfigured = true; await user.save();
+    await audit('password_set', user._id, [], { initialSetup: true });
+    return { user: publicUser(user) };
+  });
+
   app.post('/api/auth/logout', async (request) => {
     const token = request.headers['x-session-token']; const sessionToken = Array.isArray(token) ? token[0] : token;
     if (sessionToken) { await revokeSession(context, sessionToken); await audit('session_revoked', null); }

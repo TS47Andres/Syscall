@@ -84,6 +84,11 @@ class SyscallApi {
     return this.request('/api/auth/password/set', { method: 'POST', body: JSON.stringify({ password }) });
   }
 
+  // Sets the first password for an account authenticated through the new-user OTP flow.
+  async setInitialPassword(password: string): Promise<{ user: User }> {
+    return this.request('/api/auth/password/initial-set', { method: 'POST', body: JSON.stringify({ password }) });
+  }
+
   // Requests a password reset without exposing account existence to the browser.
   async requestPasswordReset(phone: string): Promise<{ status: string }> {
     return this.request('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ phone }) });

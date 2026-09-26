@@ -988,10 +988,8 @@ const styles: Record<string, React.CSSProperties> = {
     transition: 'color 0.15s ease',
   },
   otpNoticeBox: {
-    padding: '10px 14px',
-    borderRadius: '8px',
-    backgroundColor: '#F8FAFD',
-    border: '1px solid #EDF2FA',
+    padding: 0,
+    backgroundColor: 'transparent',
     fontSize: '13px',
     color: '#444746',
     lineHeight: '1.4',

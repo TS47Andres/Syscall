@@ -11,7 +11,9 @@ import {
   IconShieldCheck,
   IconCamera,
   IconCheck,
+  IconInfo,
 } from '../Icons';
+import { getCarrierInfo } from '../../utils/carrierLookup';
 
 interface DedicatedProfilePageProps {
   currentUser: User;
@@ -33,6 +35,8 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
   const [nameSavedSuccess, setNameSavedSuccess] = useState<boolean>(false);
   const [isCopiedAddress, setIsCopiedAddress] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const carrierInfo = getCarrierInfo(currentUser.phone);
 
   const handleProfilePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -98,7 +102,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
 
   return (
     <section style={styles.profileDedicatedPage} className="no-scrollbar">
-      {/* Top Return Bar */}
+      {/* Sticky Top Return Bar */}
       <div style={styles.profileTopBar}>
         <button
           style={styles.profileBackBtn}
@@ -108,11 +112,6 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
           <IconArrowBack size={18} color="#0B57D0" />
           <span>Back to Mail</span>
         </button>
-
-        <span style={styles.profileTopBadge}>
-          <IconShieldCheck size={14} color="#146C2E" />
-          <span>Syscall Identity Protection Active</span>
-        </span>
       </div>
 
       {/* Profile Content Container */}
@@ -155,7 +154,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
 
           <div style={{ textAlign: 'center', marginTop: '12px' }}>
             <h1 style={styles.profileMainTitle}>{currentUser.name || 'Syscall account'}</h1>
-            <p style={styles.profileSubtitle}>Manage your Indian PhoneMail identity, credentials, and security</p>
+            <p style={styles.profileSubtitle}>Manage your Indian Syscall identity, credentials, and security</p>
           </div>
         </div>
         {errorMessage && <div role="alert" style={styles.profileError}>{errorMessage}</div>}
@@ -189,13 +188,16 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
 
           {/* Syscall address card */}
           <div style={styles.profileFieldGroup}>
-            <label style={styles.profileFieldLabel}>Your PhoneMail Address</label>
+            <label style={styles.profileFieldLabel}>Your Syscall Address</label>
             <div style={styles.addressDisplayBox}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
                 <span style={styles.addressMonoText}>{currentUser.emailAddress}</span>
-                <span style={styles.verifiedAddressPill}>
-                  <IconCheck size={12} color="#146C2E" />
-                  <span>Verified</span>
+                <span
+                  title="Verified Syscall Address"
+                  data-tooltip="Verified Syscall Address"
+                  style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }}
+                >
+                  <IconShieldCheck size={18} color="#146C2E" />
                 </span>
               </div>
               <button
@@ -206,22 +208,36 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
               </button>
             </div>
             <span style={styles.profileFieldHint}>
-              Official Indian PhoneMail format tied to your mobile number +91 {currentUser.phone}.
+              Official Indian Syscall format tied to your mobile number +91 {currentUser.phone}.
             </span>
           </div>
 
-          {/* Telecom Number & Antivirus Info */}
-          <div style={styles.profileGridTwoCol}>
-            <div style={styles.profileMetricCard}>
-              <span style={styles.metricLabel}>Mobile Carrier Number</span>
-              <span style={styles.metricValue}>+91 {currentUser.phone}</span>
+          {/* Telecom Number & Carrier Information */}
+          <div style={styles.profileFieldGroup}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
+              <span style={styles.profileFieldLabel}>Mobile Carrier Number</span>
               <span style={styles.metricStatus}>Telecom OTP-Linked</span>
             </div>
 
-            <div style={styles.profileMetricCard}>
-              <span style={styles.metricLabel}>Antivirus Engine</span>
-              <span style={styles.metricValue}>ClamAV 1.4 Active</span>
-              <span style={styles.metricStatusGreen}>Protected Real-Time</span>
+            <div style={styles.carrierInfoRow}>
+              <span style={styles.carrierPhoneText}>
+                {carrierInfo.formattedNumber || `+91 ${currentUser.phone}`}
+              </span>
+
+              {carrierInfo.carrier && (
+                <div style={styles.carrierBadge}>
+                  <span style={styles.carrierNameText}>
+                    {carrierInfo.carrier}
+                  </span>
+                  <span
+                    title="It can only show original carrier and may show wrong carrier for ported SIMs."
+                    data-tooltip="It can only show original carrier and may show wrong carrier for ported SIMs."
+                    style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help' }}
+                  >
+                    <IconInfo size={14} color="#0B57D0" />
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -232,13 +248,6 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
               onClick={onSignOut}
             >
               Sign out of Syscall
-            </button>
-
-            <button
-              style={styles.profileReturnBtn}
-              onClick={onBackToMail}
-            >
-              Return to Mailbox
             </button>
           </div>
         </div>
@@ -258,17 +267,21 @@ const styles: Record<string, React.CSSProperties> = {
     overflowY: 'auto',
     boxShadow: '0 1px 3px rgba(60,64,67,0.06)',
     minWidth: 0,
-    padding: '24px 32px',
+    padding: '16px 32px 32px 32px',
+    position: 'relative',
   },
   profileTopBar: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 20,
+    backgroundColor: '#FFFFFF',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
+    paddingTop: '8px',
     paddingBottom: '16px',
     borderBottom: '1px solid #F1F3F4',
-    marginBottom: '24px',
-    flexWrap: 'wrap',
-    gap: '12px',
+    marginBottom: '20px',
   },
   profileBackBtn: {
     display: 'inline-flex',
@@ -284,30 +297,19 @@ const styles: Record<string, React.CSSProperties> = {
     border: 'none',
     transition: 'background-color 0.15s ease',
   },
-  profileTopBadge: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '6px',
-    padding: '4px 12px',
-    borderRadius: '14px',
-    backgroundColor: '#ECFDF5',
-    color: '#146C2E',
-    fontSize: '12px',
-    fontWeight: 600,
-  },
   profileContentCard: {
     maxWidth: '680px',
     margin: '0 auto',
     width: '100%',
     display: 'flex',
     flexDirection: 'column',
-    gap: '28px',
+    gap: '24px',
   },
   profileHeroSection: {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    padding: '20px 0 10px',
+    padding: '12px 0 6px',
   },
   profileAvatarLargeWrapper: {
     display: 'flex',
@@ -367,16 +369,17 @@ const styles: Record<string, React.CSSProperties> = {
   profileInfoSection: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px',
+    gap: '18px',
   },
   profileFieldGroup: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '8px',
-    backgroundColor: '#F8FAFD',
+    gap: '10px',
+    backgroundColor: '#FFFFFF',
     borderRadius: '12px',
-    padding: '16px',
-    border: '1px solid #EDF2FA',
+    padding: '18px',
+    border: '1px solid #E0E2EC',
+    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
   },
   profileFieldLabel: {
     fontSize: '12px',
@@ -435,86 +438,74 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: '12px',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F8FAFD',
     padding: '10px 14px',
     borderRadius: '8px',
-    border: '1px solid #E0E2EC',
+    border: '1px solid #D3E3FD',
   },
   addressMonoText: {
     fontFamily: 'var(--font-mono)',
-    fontSize: '14px',
+    fontSize: '14.5px',
     fontWeight: 600,
     color: '#0B57D0',
   },
-  verifiedAddressPill: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '4px',
-    fontSize: '11px',
-    fontWeight: 700,
-    color: '#146C2E',
-    backgroundColor: '#ECFDF5',
-    padding: '2px 8px',
-    borderRadius: '10px',
-  },
   copyAddressBtn: {
-    padding: '6px 12px',
+    padding: '6px 14px',
     borderRadius: '6px',
-    backgroundColor: '#F1F3F4',
+    backgroundColor: '#FFFFFF',
+    border: '1px solid #DADCE0',
     color: '#1F1F1F',
     fontWeight: 600,
     fontSize: '12px',
-    border: 'none',
     cursor: 'pointer',
     flexShrink: 0,
+    transition: 'all 0.15s ease',
   },
   profileFieldHint: {
     fontSize: '12px',
     color: '#747775',
   },
-  profileGridTwoCol: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-    gap: '12px',
-  },
-  profileMetricCard: {
-    padding: '16px',
-    borderRadius: '12px',
-    backgroundColor: '#F8FAFD',
-    border: '1px solid #EDF2FA',
+  carrierInfoRow: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: '4px',
+    alignItems: 'center',
+    gap: '12px',
+    flexWrap: 'wrap',
+    paddingTop: '2px',
   },
-  metricLabel: {
-    fontSize: '11.5px',
-    color: '#747775',
-    fontWeight: 600,
-    textTransform: 'uppercase',
-  },
-  metricValue: {
+  carrierPhoneText: {
+    fontFamily: 'var(--font-mono)',
     fontSize: '15px',
     fontWeight: 700,
     color: '#1F1F1F',
   },
-  metricStatus: {
+  carrierBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '6px',
+    backgroundColor: '#EAF1FB',
+    border: '1px solid #C2E7FF',
+    padding: '3px 10px',
+    borderRadius: '12px',
+  },
+  carrierNameText: {
     fontSize: '12px',
+    fontWeight: 600,
+    color: '#0B57D0',
+  },
+  metricStatus: {
+    fontSize: '11.5px',
     color: '#0B57D0',
     fontWeight: 600,
-  },
-  metricStatusGreen: {
-    fontSize: '12px',
-    color: '#146C2E',
-    fontWeight: 600,
+    backgroundColor: '#EAF1FB',
+    padding: '2px 8px',
+    borderRadius: '8px',
   },
   profileActionsRow: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: '16px',
+    justifyContent: 'flex-start',
+    paddingTop: '12px',
     borderTop: '1px solid #F1F3F4',
-    flexWrap: 'wrap',
-    gap: '12px',
   },
   profileSignOutBtn: {
     padding: '10px 20px',
@@ -525,15 +516,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: '13px',
     border: 'none',
     cursor: 'pointer',
-  },
-  profileReturnBtn: {
-    padding: '10px 20px',
-    borderRadius: '8px',
-    backgroundColor: '#0B57D0',
-    color: '#FFFFFF',
-    fontWeight: 600,
-    fontSize: '13px',
-    border: 'none',
-    cursor: 'pointer',
+    transition: 'background-color 0.15s ease',
   },
 };

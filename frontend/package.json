@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "flatpickr": "^4.6.13",
+    "libphonenumber-js": "^1.13.14",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-router-dom": "^7.3.0"

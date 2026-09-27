@@ -38,13 +38,17 @@ function CustomFilterSelect<T extends string>({
 
   useEffect(() => {
     if (!isOpen) return;
-    const handleDocClick = (e: MouseEvent) => {
+    const handleDocClick = (e: MouseEvent | TouchEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
       }
     };
     document.addEventListener('mousedown', handleDocClick);
-    return () => document.removeEventListener('mousedown', handleDocClick);
+    document.addEventListener('touchstart', handleDocClick);
+    return () => {
+      document.removeEventListener('mousedown', handleDocClick);
+      document.removeEventListener('touchstart', handleDocClick);
+    };
   }, [isOpen]);
 
   const currentOption = options.find((o) => o.value === value) || options[0];
@@ -126,12 +130,13 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
   // Close when clicking outside the panel
   useEffect(() => {
     if (!isOpen) return;
-    const handleOutsideClick = (e: MouseEvent) => {
+    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
       const target = e.target as HTMLElement | null;
       if (panelRef.current && !panelRef.current.contains(target)) {
         const isToggleBtn =
           target?.closest('button[title*="Search options"]') ||
-          target?.closest('button[aria-label*="Search options"]');
+          target?.closest('button[aria-label*="Search options"]') ||
+          target?.closest('.gmail-filter-btn');
         if (!isToggleBtn) {
           onClose();
         }
@@ -141,9 +146,11 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
       if (e.key === 'Escape') onClose();
     };
     document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isOpen, onClose]);
@@ -162,29 +169,33 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
   };
 
   return (
-    <div
-      ref={panelRef}
-      style={styles.dropdownPanel}
-      className="search-bar-extended-panel"
-    >
-      <form onSubmit={handleSubmit} style={styles.formContainer}>
-        {/* Search Scope / Folder with Custom Dropdown */}
-        <CustomFilterSelect<NonNullable<EmailSearchFilters['folderScope']>>
-          label={t('filter_folder', currentLanguage)}
-          value={localFilters.folderScope || 'current'}
-          options={[
-            { value: 'current', label: t('folder_current', currentLanguage) },
-            { value: 'all', label: t('folder_all', currentLanguage) },
-            { value: 'inbox', label: t('inbox', currentLanguage) },
-            { value: 'sent', label: t('sent', currentLanguage) },
-            { value: 'drafts', label: t('drafts', currentLanguage) },
-            { value: 'trash', label: t('bin', currentLanguage) },
-          ]}
-          onChange={(val) => setLocalFilters((prev) => ({ ...prev, folderScope: val }))}
-        />
+    <>
+      {/* Mobile Backdrop to dim background and allow closing on outside tap */}
+      <div className="search-filter-backdrop" onClick={onClose} />
 
-        {/* From & To in a 2-column grid with curved borders */}
-        <div style={styles.gridTwo}>
+      <div
+        ref={panelRef}
+        style={styles.dropdownPanel}
+        className="search-bar-extended-panel"
+      >
+        <form onSubmit={handleSubmit} style={styles.formContainer}>
+          {/* Search Scope / Folder with Custom Dropdown */}
+          <CustomFilterSelect<NonNullable<EmailSearchFilters['folderScope']>>
+            label={t('filter_folder', currentLanguage)}
+            value={localFilters.folderScope || 'current'}
+            options={[
+              { value: 'current', label: t('folder_current', currentLanguage) },
+              { value: 'all', label: t('folder_all', currentLanguage) },
+              { value: 'inbox', label: t('inbox', currentLanguage) },
+              { value: 'sent', label: t('sent', currentLanguage) },
+              { value: 'drafts', label: t('drafts', currentLanguage) },
+              { value: 'trash', label: t('bin', currentLanguage) },
+            ]}
+            onChange={(val) => setLocalFilters((prev) => ({ ...prev, folderScope: val }))}
+          />
+
+          {/* From & To in a 2-column grid with curved borders */}
+          <div style={styles.gridTwo} className="search-filter-grid-two">
           <div style={styles.fieldRow}>
             <label style={styles.fieldLabel}>{t('filter_from', currentLanguage)}</label>
             <input
@@ -248,7 +259,7 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
         />
 
         {/* Aesthetic Animated Checkboxes without any background container */}
-        <div style={styles.checkboxesRow}>
+        <div style={styles.checkboxesRow} className="search-filter-checkboxes-row">
           {/* Has Attachment */}
           <label
             className="syscall-aesthetic-checkbox-label"
@@ -305,26 +316,29 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
         </div>
 
         {/* Action Buttons Footer */}
-        <div style={styles.actionsFooter}>
+        <div style={styles.actionsFooter} className="search-filter-actions-footer">
           <button
             type="button"
             onClick={handleReset}
             style={styles.resetBtn}
+            className="search-filter-reset-btn"
           >
             {t('filter_reset', currentLanguage)}
           </button>
 
-          <div style={styles.rightButtons}>
+          <div style={styles.rightButtons} className="search-filter-right-btns">
             <button
               type="button"
               onClick={onClose}
               style={styles.cancelBtn}
+              className="search-filter-cancel-btn"
             >
               Cancel
             </button>
             <button
               type="submit"
               style={styles.applyBtn}
+              className="search-filter-apply-btn"
             >
               <IconSearch size={14} color="#FFFFFF" />
               <span>{t('filter_apply', currentLanguage)}</span>
@@ -333,6 +347,7 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
         </div>
       </form>
     </div>
+    </>
   );
 };
 

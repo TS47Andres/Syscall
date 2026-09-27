@@ -385,6 +385,74 @@ input, textarea, select {
     gap: 6px !important;
   }
 
+  .gmail-header-right.hide-on-mobile-filter {
+    display: none !important;
+  }
+
+  /* Responsive Search Filter Tab for Mobile */
+  .search-filter-backdrop {
+    display: block !important;
+    position: fixed !important;
+    top: 56px !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background-color: rgba(0, 0, 0, 0.38) !important;
+    z-index: 550 !important;
+    backdrop-filter: blur(2px) !important;
+    -webkit-backdrop-filter: blur(2px) !important;
+  }
+
+  .gmail-search-pill.is-filter-open {
+    width: 100% !important;
+    border-radius: 20px 20px 0 0 !important;
+    background-color: #FFFFFF !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16) !important;
+    z-index: 600 !important;
+  }
+
+  .search-bar-extended-panel {
+    max-height: calc(100dvh - 68px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 14px 16px 14px !important;
+    border-radius: 0 0 20px 20px !important;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.22) !important;
+  }
+
+  .search-filter-grid-two {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  .search-filter-checkboxes-row {
+    gap: 12px 16px !important;
+    margin-top: 2px !important;
+    padding: 4px 0 !important;
+  }
+
+  .search-filter-actions-footer {
+    position: sticky !important;
+    bottom: 0 !important;
+    background-color: #FFFFFF !important;
+    padding-top: 10px !important;
+    padding-bottom: 2px !important;
+    margin-top: 6px !important;
+    z-index: 10 !important;
+  }
+
+  .syscall-curved-input,
+  .syscall-custom-dropdown-btn {
+    height: 42px !important;
+    font-size: 14.5px !important;
+  }
+
+  .syscall-custom-dropdown-popover {
+    max-height: 200px !important;
+    overflow-y: auto !important;
+  }
+
   /* Email List takes full width on mobile */
   .gmail-email-list-wrapper {
     width: 100% !important;
@@ -417,6 +485,17 @@ input, textarea, select {
     padding: 0 16px;
     border-radius: 14px;
     font-size: 13.5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .search-bar-extended-panel {
+    padding: 10px 10px 14px 10px !important;
+  }
+
+  .search-filter-actions-footer button {
+    padding: 7px 11px !important;
+    font-size: 12.5px !important;
   }
 }
 
@@ -1471,6 +1550,34 @@ input, textarea, select {
     opacity: 1;
     transform: translateY(0) scaleY(1);
   }
+}
+
+.search-filter-backdrop {
+  display: none;
+}
+
+.search-filter-grid-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.search-filter-checkboxes-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 6px 2px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.search-filter-actions-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 12px;
+  border-top: 1px solid #F1F3F4;
+  margin-top: 4px;
 }
 
 /* ==========================================================================

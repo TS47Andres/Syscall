@@ -114,7 +114,7 @@ export const Header: React.FC<HeaderProps> = ({
           ...styles.searchBar,
           ...(isFilterOpen ? styles.searchBarExpanded : {}),
         }}
-        className="gmail-search-pill"
+        className={`gmail-search-pill ${isFilterOpen ? 'is-filter-open' : ''}`}
       >
         <button
           style={styles.mobileHamburger}
@@ -174,7 +174,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Right: Current Time + Sarvam AI Logo + Profile Avatar */}
-      <div style={styles.rightArea} className="gmail-header-right">
+      <div style={styles.rightArea} className={`gmail-header-right ${isFilterOpen ? 'hide-on-mobile-filter' : ''}`}>
         {/* Current Time Display (Day, date and time hh:mm 24-hour format, No bg) */}
         <div style={styles.headerTimeText} className="desktop-only" title="Current Time (24-hour format)">
           {headerTime}

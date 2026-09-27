@@ -76,10 +76,23 @@ export const Header: React.FC<HeaderProps> = ({
     return () => clearInterval(timer);
   }, []);
 
+  // Detect mobile viewport (<= 768px)
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= 768 : false
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   return (
-    <header style={styles.header}>
-      {/* Left: Brand Identity + Hamburger */}
-      <div style={styles.leftBrand}>
+    <header style={styles.header} className="gmail-top-header">
+      {/* Left: Brand Identity + Hamburger (Desktop only) */}
+      <div style={styles.leftBrand} className="desktop-only">
         <button
           style={styles.hamburgerBtn}
           onClick={onToggleSidebarCollapse}
@@ -101,17 +114,19 @@ export const Header: React.FC<HeaderProps> = ({
           ...styles.searchBar,
           ...(isFilterOpen ? styles.searchBarExpanded : {}),
         }}
+        className="gmail-search-pill"
       >
         <button
           style={styles.mobileHamburger}
           className="mobile-only"
           onClick={onToggleDrawer}
           title="Open menu"
+          aria-label="Open menu"
         >
           <IconMenu size={20} color="#444746" />
         </button>
 
-        <span style={styles.searchGlassIcon}>
+        <span style={styles.searchGlassIcon} className="desktop-only">
           <IconSearch size={18} color="#444746" />
         </span>
 
@@ -119,8 +134,9 @@ export const Header: React.FC<HeaderProps> = ({
           type="text"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder={t('search_placeholder', currentUser.language)}
+          placeholder={isMobile ? 'Syscall' : t('search_placeholder', currentUser.language)}
           style={styles.searchInput}
+          className="gmail-search-input"
         />
 
         {searchQuery && (
@@ -155,16 +171,16 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Right: Current Time + Sarvam AI Logo + Profile Avatar */}
-      <div style={styles.rightArea}>
+      <div style={styles.rightArea} className="gmail-header-right">
         {/* Current Time Display (Day, date and time hh:mm 24-hour format, No bg) */}
-        <div style={styles.headerTimeText} title="Current Time (24-hour format)">
+        <div style={styles.headerTimeText} className="desktop-only" title="Current Time (24-hour format)">
           {headerTime}
         </div>
 
         {/* Sarvam AI Logo / Launcher (Pure zoom on hover, transparent bg, no blue hue/border) */}
         <button
           style={styles.sarvamAiBtn}
-          className="sarvam-ai-btn"
+          className="sarvam-ai-btn desktop-only"
           title="Sarvam AI Agent (Coming soon)"
           aria-label="Sarvam AI Agent"
         >

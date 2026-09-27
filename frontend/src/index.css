@@ -354,17 +354,30 @@ input, textarea, select {
   }
 
   .gmail-top-header {
-    height: 56px;
-    padding: 6px 12px;
-    gap: 8px;
+    height: 56px !important;
+    padding: 6px 12px !important;
+    gap: 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
 
   .gmail-search-pill {
-    max-width: 100%;
-    height: 46px;
-    padding: 0 12px;
-    gap: 8px;
-    box-shadow: 0 1px 3px rgba(60,64,67,0.12);
+    flex: 1 !important;
+    max-width: 100% !important;
+    height: 44px !important;
+    padding: 0 10px 0 6px !important;
+    gap: 6px !important;
+    box-shadow: 0 1px 3px rgba(60,64,67,0.12) !important;
+    border-radius: 22px !important;
+  }
+
+  .gmail-search-input {
+    font-size: 15px !important;
+    font-weight: 500 !important;
+  }
+
+  .gmail-header-right {
+    gap: 6px !important;
   }
 
   /* Email List takes full width on mobile */

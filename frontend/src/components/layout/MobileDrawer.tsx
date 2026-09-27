@@ -37,14 +37,21 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
       <div style={styles.backdrop} onClick={onClose} />
       <aside style={styles.drawer} className="animate-slide-left">
         <div style={styles.topHeader}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <SyscallLogo size={28} />
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, color: '#1F1F1F' }}>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}
+            onClick={() => {
+              onSelectFolder('inbox');
+              onClose();
+            }}
+            title="Syscall"
+          >
+            <SyscallLogo size={32} />
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: '#1F1F1F', letterSpacing: '-0.3px' }}>
               Syscall
             </span>
           </div>
-          <button style={styles.closeBtn} onClick={onClose}>
-            <IconClose size={18} color="#444746" />
+          <button style={styles.closeBtn} onClick={onClose} title="Close menu" aria-label="Close menu">
+            <IconClose size={20} color="#444746" />
           </button>
         </div>
 
@@ -123,13 +130,14 @@ const styles: Record<string, React.CSSProperties> = {
     top: 0,
     left: 0,
     bottom: 0,
-    width: '280px',
+    width: '285px',
+    maxWidth: '85vw',
     backgroundColor: '#FFFFFF',
     zIndex: 999,
     display: 'flex',
     flexDirection: 'column',
-    padding: '16px',
-    boxShadow: 'var(--shadow-dropdown)',
+    padding: '14px 12px',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
   },
   topHeader: {
     display: 'flex',

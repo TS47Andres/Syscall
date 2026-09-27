@@ -16,14 +16,14 @@ export const FloatingComposeButton: React.FC<FloatingComposeButtonProps> = ({
 
   return (
     <div className="floating-actions-container">
-      {/* Sarvam AI Logo / Launcher (Pure zoom on hover, transparent bg, same as laptop device) */}
+      {/* Sarvam AI Logo / Launcher (same as laptop device) */}
       <button
         type="button"
-        className="sarvam-ai-btn sarvam-ai-fab"
+        className="sarvam-ai-fab"
         title="Sarvam AI Agent (Coming soon)"
         aria-label="Sarvam AI Agent"
       >
-        <IconSarvamAI size={26} />
+        <IconSarvamAI size={28} />
       </button>
 
       <button

@@ -90,6 +90,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
   });
 
   const handleHeaderPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) return;
     if ((e.target as HTMLElement).closest('button')) return;
     if (e.button !== 0) return;
     const modal = e.currentTarget.parentElement;
@@ -207,7 +208,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
   };
 
   return (
-    <div style={dockStyle} className="animate-fade-in">
+    <div style={dockStyle} className={`syscall-compose-modal animate-fade-in ${isMinimized ? 'is-minimized' : ''}`}>
       {/* Header Bar - Draggable across entire page */}
       <div
         style={{
@@ -247,14 +248,14 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
       </div>
 
       {!isMinimized && (
-        <div style={styles.contentWrap} className="no-scrollbar">
+        <div style={styles.contentWrap} className="compose-content-wrap no-scrollbar">
           {errorMsg && (
             <div style={styles.errorBox}>
               <span>{errorMsg}</span>
             </div>
           )}
 
-          <form onSubmit={handleSend} style={styles.form}>
+          <form onSubmit={handleSend} style={styles.form} className="compose-form">
             {/* Recipient Input */}
             <div style={styles.fieldRow}>
               <label style={styles.label}>To:</label>
@@ -323,20 +324,20 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
             </div>
 
             {/* Body: Scrollable section with turned-off scrollbar visibility and no extending resize */}
-            <div style={styles.bodyWrapper}>
+            <div style={styles.bodyWrapper} className="compose-body-wrapper">
               <textarea
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 placeholder="Write your email here..."
                 style={styles.bodyTextarea}
-                className="no-scrollbar"
+                className="compose-body-textarea no-scrollbar"
                 rows={7}
                 disabled={generatingEmail}
               />
             </div>
 
             {/* Attachments and scheduling follow the message content. */}
-            <div style={styles.composeToolbarRow}>
+            <div style={styles.composeToolbarRow} className="compose-toolbar-row">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <input
                   ref={fileInputRef}
@@ -436,7 +437,7 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
             )}
 
             {/* Actions: Discard with Shield Tooltip next to it, and Send Syscall button */}
-            <div style={styles.actionRow}>
+            <div style={styles.actionRow} className="compose-action-row">
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <button type="button" onClick={onClose} style={styles.cancelBtn}>
                   Discard

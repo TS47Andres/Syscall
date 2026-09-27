@@ -11,6 +11,12 @@ interface LogoProps {
  * Combines Gmail's folded-envelope origami aesthetic with a cellular handset arc and @niti loop
  */
 export const SyscallLogo: React.FC<LogoProps> = ({ size = 36, style }) => {
+  const rawId = React.useId();
+  const cleanId = rawId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const envLeft = `envelopeLeft_${cleanId}`;
+  const envRight = `envelopeRight_${cleanId}`;
+  const foldFlap = `foldFlap_${cleanId}`;
+
   return (
     <svg
       width={size}
@@ -18,43 +24,40 @@ export const SyscallLogo: React.FC<LogoProps> = ({ size = 36, style }) => {
       viewBox="0 0 100 100"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
-      style={{ display: 'inline-block', flexShrink: 0, ...style }}
+      style={{ display: 'inline-block', flexShrink: 0, filter: 'drop-shadow(0 2px 3px rgba(30, 41, 59, 0.15))', ...style }}
     >
       <defs>
-        <linearGradient id="envelopeLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+        <linearGradient id={envLeft} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="#4F46E5" />
           <stop offset="100%" stopColor="#3B82F6" />
         </linearGradient>
-        <linearGradient id="envelopeRight" x1="100%" y1="0%" x2="0%" y2="100%">
+        <linearGradient id={envRight} x1="100%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stopColor="#06B6D4" />
           <stop offset="100%" stopColor="#10B981" />
         </linearGradient>
-        <linearGradient id="foldFlap" x1="50%" y1="0%" x2="50%" y2="100%">
+        <linearGradient id={foldFlap} x1="50%" y1="0%" x2="50%" y2="100%">
           <stop offset="0%" stopColor="#6366F1" />
           <stop offset="100%" stopColor="#4F46E5" />
         </linearGradient>
-        <filter id="logoShadow" x="-10%" y="-10%" width="120%" height="120%">
-          <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#1E293B" floodOpacity="0.15" />
-        </filter>
       </defs>
 
-      <g filter="url(#logoShadow)">
+      <g>
         {/* Left Envelope Wing / Handset Base */}
         <path
           d="M18 34C18 29.5817 21.5817 26 26 26H50V74H26C21.5817 74 18 70.4183 18 66V34Z"
-          fill="url(#envelopeLeft)"
+          fill={`url(#${envLeft})`}
         />
 
         {/* Right Envelope Wing / Handset Receiver */}
         <path
           d="M50 26H74C78.4183 26 82 29.5817 82 34V66C82 70.4183 78.4183 74 74 74H50V26Z"
-          fill="url(#envelopeRight)"
+          fill={`url(#${envRight})`}
         />
 
         {/* Dynamic V-Fold Envelope Flap forming Phone Arc */}
         <path
           d="M18 28L47.2 52.8C48.8 54.2 51.2 54.2 52.8 52.8L82 28L50 56L18 28Z"
-          fill="url(#foldFlap)"
+          fill={`url(#${foldFlap})`}
           fillOpacity="0.95"
         />
 

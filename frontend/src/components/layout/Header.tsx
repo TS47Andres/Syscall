@@ -120,10 +120,10 @@ export const Header: React.FC<HeaderProps> = ({
           style={styles.mobileHamburger}
           className="mobile-only"
           onClick={onToggleDrawer}
-          title="Syscall"
-          aria-label="Syscall"
+          title="Open menu"
+          aria-label="Open menu"
         >
-          <SyscallLogo size={24} />
+          <IconMenu size={20} color="#444746" />
         </button>
 
         <span style={styles.searchGlassIcon} className="desktop-only">

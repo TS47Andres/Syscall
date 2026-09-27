@@ -125,6 +125,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
       publicId: message.publicId,
       senderAddress: message.senderAddress,
       recipientAddress: message.recipientAddress,
+      isSender,
       subject: message.subject,
       textBody: message.textBody,
       htmlBody: message.htmlBody,
@@ -793,7 +794,32 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   });
 
   // Lists only live messages visible to this participant, with participant-specific flags.
-  app.get('/api/mail', async (request) => { const user = await requireUser(request); const messages = await Email.find({ $or: [{ recipientUserId: user._id, recipientDeletedAt: null, recipientPermanentlyDeletedAt: null, deliveryStatus: { $nin: ['scheduled', 'cancelled'] } }, { senderUserId: user._id, senderDeletedAt: null, senderPermanentlyDeletedAt: null, deliveryStatus: { $nin: ['scheduled', 'cancelled'] } }] }).sort({ createdAt: -1 }).limit(100).lean(); return messages.map((message) => publicEmailRecord(message as unknown as import('@syscall/db').EmailDocument, message.senderUserId.equals(user._id), message.senderUserId.equals(user._id) ? Boolean(message.senderStarredAt) : Boolean(message.recipientStarredAt), false)); });
+  app.get('/api/mail', async (request) => {
+    const user = await requireUser(request);
+    const messages = await Email.find({
+      $or: [
+        { recipientUserId: user._id, recipientDeletedAt: null, recipientPermanentlyDeletedAt: null, deliveryStatus: { $nin: ['scheduled', 'cancelled'] } },
+        { senderUserId: user._id, senderDeletedAt: null, senderPermanentlyDeletedAt: null, deliveryStatus: { $nin: ['scheduled', 'cancelled'] } },
+      ],
+    }).sort({ createdAt: -1 }).limit(100).lean();
+    const participantIds = [...new Set(messages.flatMap((message) => [String(message.senderUserId), String(message.recipientUserId)]))];
+    const participants = await User.find({ _id: { $in: participantIds } }).select({ displayName: 1 }).lean();
+    const displayNames = new Map(participants.map((participant) => [String(participant._id), participant.displayName]));
+
+    return messages.map((message) => {
+      const isSender = message.senderUserId.equals(user._id);
+      return {
+        ...publicEmailRecord(
+          message as unknown as import('@syscall/db').EmailDocument,
+          isSender,
+          isSender ? Boolean(message.senderStarredAt) : Boolean(message.recipientStarredAt),
+          false,
+        ),
+        senderName: displayNames.get(String(message.senderUserId)) || '',
+        recipientName: displayNames.get(String(message.recipientUserId)) || '',
+      };
+    });
+  });
 
   // Lists only messages in the authenticated participant's recoverable trash.
   app.get('/api/mail/trash', async (request) => { const user = await requireUser(request); const messages = await Email.find({ $or: [{ recipientUserId: user._id, recipientDeletedAt: { $ne: null }, recipientPermanentlyDeletedAt: null }, { senderUserId: user._id, senderDeletedAt: { $ne: null }, senderPermanentlyDeletedAt: null }] }).sort({ updatedAt: -1 }).limit(100).lean(); return messages.map((message) => publicEmailRecord(message as unknown as import('@syscall/db').EmailDocument, message.senderUserId.equals(user._id), message.senderUserId.equals(user._id) ? Boolean(message.senderStarredAt) : Boolean(message.recipientStarredAt), true)); });

@@ -40,6 +40,9 @@ export interface Email {
   publicId: string;
   senderAddress: string;
   recipientAddress: string;
+  senderName?: string;
+  recipientName?: string;
+  isSender?: boolean;
   subject: string;
   textBody: string;
   htmlBody?: string | null;

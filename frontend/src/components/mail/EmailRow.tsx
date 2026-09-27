@@ -44,7 +44,9 @@ export const EmailRow: React.FC<EmailRowProps> = ({
   onToggleSpam,
 }) => {
   const isUnread = !email.readAt;
-  const displayedAddress = folder === 'sent' ? email.recipientAddress : email.senderAddress;
+  const showRecipient = folder === 'sent' || (email.isSender && folder !== 'drafts' && folder !== 'scheduled');
+  const displayedAddress = showRecipient ? email.recipientAddress : email.senderAddress;
+  const displayedName = showRecipient ? email.recipientName : email.senderName;
 
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
@@ -173,13 +175,13 @@ export const EmailRow: React.FC<EmailRowProps> = ({
           fontSize: 12,
         }}
       >
-        {displayedAddress.slice(0, 2).toUpperCase()}
+        {(displayedName?.trim() || displayedAddress).slice(0, 2).toUpperCase()}
       </div>
 
       {/* Sender Name / Phone */}
       <div style={styles.senderCol} title={displayedAddress}>
         <span style={{ fontSize: 13.5, color: '#1F1F1F' }}>
-          {formatPhone(displayedAddress)}
+          {displayedName?.trim() || formatPhone(displayedAddress)}
         </span>
       </div>
 

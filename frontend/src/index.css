@@ -326,7 +326,7 @@ input, textarea, select {
   right: 24px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-end;
   gap: 12px;
   z-index: 990;
   pointer-events: none;
@@ -621,6 +621,7 @@ input, textarea, select {
     bottom: 18px !important;
     right: 18px !important;
     gap: 10px !important;
+    align-items: flex-end !important;
   }
 
   .sarvam-ai-fab {

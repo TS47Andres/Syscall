@@ -35,6 +35,7 @@ interface DedicatedProfilePageProps {
   }) => Promise<void>;
   onSignOut: () => void;
   onBackToMail: () => void;
+  isSearchFilterOpen?: boolean;
 }
 
 const GENDER_OPTIONS: Array<{
@@ -75,6 +76,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
   onUpdateProfileDetails,
   onSignOut,
   onBackToMail,
+  isSearchFilterOpen = false,
 }) => {
   const profileFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -93,6 +95,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
   // Flatpickr Date of Birth state (matching scheduled emails picker)
   const [dateOfBirth, setDateOfBirth] = useState<string>(currentUser.dateOfBirth || '');
   const dobInputRef = useRef<HTMLInputElement | null>(null);
+  const dobPositionRef = useRef<HTMLDivElement | null>(null);
   const dobFpRef = useRef<FlatpickrInstance | null>(null);
 
   const [personalSavedSuccess, setPersonalSavedSuccess] = useState<boolean>(false);
@@ -127,6 +130,8 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
       altInput: true,
       altFormat: 'F j, Y',
       altInputClass: 'profile-dob-alt-input',
+      appendTo: document.body,
+      positionElement: dobPositionRef.current ?? undefined,
       maxDate: new Date(),
       monthSelectorType: 'dropdown',
       disableMobile: true,
@@ -171,8 +176,8 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
         setGenderDropdownOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleGenderOutside);
-    return () => document.removeEventListener('mousedown', handleGenderOutside);
+    document.addEventListener('pointerdown', handleGenderOutside);
+    return () => document.removeEventListener('pointerdown', handleGenderOutside);
   }, [genderDropdownOpen]);
 
   // Close language dropdown on outside click
@@ -183,8 +188,8 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
         setLangDropdownOpen(false);
       }
     };
-    document.addEventListener('mousedown', handleLangOutside);
-    return () => document.removeEventListener('mousedown', handleLangOutside);
+    document.addEventListener('pointerdown', handleLangOutside);
+    return () => document.removeEventListener('pointerdown', handleLangOutside);
   }, [langDropdownOpen]);
 
   const carrierInfo = getCarrierInfo(currentUser.phone);
@@ -328,21 +333,23 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
     : t('select_gender', savedLang);
 
   return (
-    <section style={styles.profileDedicatedPage} className="no-scrollbar">
+    <section style={styles.profileDedicatedPage} className="profile-page-shell no-scrollbar">
       {/* Top Navigation Bar */}
-      <div style={styles.profileTopBar}>
-        <button
-          style={styles.profileBackBtn}
-          onClick={onBackToMail}
-          title={t('back_to_mail', savedLang)}
-        >
-          <IconArrowBack size={18} color="#0B57D0" />
-          <span>{t('back_to_mail', savedLang)}</span>
-        </button>
-      </div>
+      {!isSearchFilterOpen && (
+        <div style={styles.profileTopBar} className="profile-topbar">
+          <button
+            style={styles.profileBackBtn}
+            onClick={onBackToMail}
+            title={t('back_to_mail', savedLang)}
+          >
+            <IconArrowBack size={18} color="#0B57D0" />
+            <span>{t('back_to_mail', savedLang)}</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Profile Content Container */}
-      <div style={styles.profileContentCard}>
+      <div style={styles.profileContentCard} className="profile-content-card">
         {/* Hero Section with Avatar */}
         <div style={styles.profileHeroSection}>
           <div style={styles.profileAvatarLargeWrapper}>
@@ -380,7 +387,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
           </div>
 
           <div style={{ textAlign: 'center', marginTop: '12px' }}>
-            <h1 style={styles.profileMainTitle}>{currentUser.name || t('profile_title', savedLang)}</h1>
+            <h1 style={styles.profileMainTitle} className="profile-main-title">{currentUser.name || t('profile_title', savedLang)}</h1>
             <p style={styles.profileSubtitle}>{t('profile_subtitle', savedLang)}</p>
           </div>
         </div>
@@ -389,9 +396,9 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
 
         <div style={styles.profileInfoSection}>
           {/* Card 1: Display Name */}
-          <div style={styles.profileCard}>
+          <div style={styles.profileCard} className="profile-card">
             <label style={styles.cardHeaderLabel}>{t('display_name', savedLang)}</label>
-            <div style={styles.profileInputRow}>
+            <div style={styles.profileInputRow} className="profile-input-row">
               <input
                 type="text"
                 value={editingName}
@@ -412,7 +419,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
               </button>
             </div>
             {nameSavedSuccess && (
-              <span style={styles.profileSuccessToast}>
+              <span style={styles.profileSuccessToast} className="profile-success-toast">
                 <IconCheck size={14} color="#146C2E" />
                 <span>{t('name_saved', savedLang)}</span>
               </span>
@@ -420,7 +427,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
           </div>
 
           {/* Card 2: Personal Details (Gender Dropdown & Flatpickr Date of Birth) */}
-          <div style={styles.profileCard}>
+          <div style={styles.profileCard} className="profile-card">
             <div style={styles.cardTitleBar}>
               <div>
                 <span style={styles.cardHeaderLabel}>{t('personal_details', savedLang)}</span>
@@ -433,7 +440,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
             {/* Division 1: Gender Dropdown */}
             <div style={styles.subSectionBlock}>
               <label style={styles.subSectionTitle}>{t('gender_label', savedLang)}</label>
-              <div style={{ position: 'relative', maxWidth: '260px' }} ref={genderDropdownRef}>
+              <div style={{ position: 'relative', maxWidth: '260px' }} className="profile-gender-control" ref={genderDropdownRef}>
                 <button
                   type="button"
                   style={styles.compactDropdownBtn}
@@ -463,7 +470,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
                 </button>
 
                 {genderDropdownOpen && (
-                  <div style={styles.compactDropdownMenu} className="lang-dropdown-menu">
+                  <div style={styles.compactDropdownMenu} className="lang-dropdown-menu profile-gender-menu">
                     {GENDER_OPTIONS.map((opt) => {
                       const isSelected = selectedGender === opt.value;
                       return (
@@ -496,7 +503,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
 
             {/* Division 2: Date of Birth */}
             <div style={styles.subSectionBlock}>
-              <div style={styles.dobHeaderRow}>
+              <div style={styles.dobHeaderRow} className="profile-dob-header">
                 <label style={styles.subSectionTitle}>{t('choose_dob', savedLang)}</label>
                 {computedAge !== null && (
                   <span style={styles.ageBadge}>
@@ -507,6 +514,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
 
               {/* Flatpickr DOB Bar (Neutral, No Blue Hue) */}
               <div
+                ref={dobPositionRef}
                 className={`profile-dob-bar ${dateOfBirth ? 'is-active' : ''}`}
                 onClick={() => dobFpRef.current?.open()}
                 style={styles.profileDobBar}
@@ -546,10 +554,10 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
             </div>
 
             {/* Save Personal Details Action */}
-            <div style={styles.cardFooterAction}>
+            <div style={styles.cardFooterAction} className="profile-card-footer">
               <div>
                 {personalSavedSuccess && (
-                  <span style={styles.profileSuccessToast}>
+                  <span style={styles.profileSuccessToast} className="profile-success-toast">
                     <IconCheck size={14} color="#146C2E" />
                     <span>{t('personal_saved', savedLang)}</span>
                   </span>
@@ -570,7 +578,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
           </div>
 
           {/* Card 3: Language Settings (LIVE PREVIEW ONLY FOR THIS SECTION) */}
-          <div style={styles.profileCard}>
+          <div style={styles.profileCard} className="profile-card">
             <div style={styles.cardTitleBar}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <IconLanguage size={20} color="#1F1F1F" />
@@ -587,7 +595,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
             </div>
 
             {/* Compact Language Dropdown */}
-            <div style={{ position: 'relative', maxWidth: '280px', marginTop: '4px' }} ref={langDropdownRef}>
+            <div style={{ position: 'relative', maxWidth: '280px', marginTop: '4px' }} className="profile-language-control" ref={langDropdownRef}>
               <button
                 type="button"
                 style={styles.compactDropdownBtn}
@@ -623,7 +631,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
               </button>
 
               {langDropdownOpen && (
-                <div style={styles.compactLangMenu} className="lang-dropdown-menu">
+                <div style={styles.compactLangMenu} className="lang-dropdown-menu profile-language-menu">
                   {/* Search Bar for Languages */}
                   <div style={styles.langSearchBox}>
                     <IconSearch size={15} color="#747775" />
@@ -648,7 +656,7 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
                   </div>
 
                   {/* Scrollable Language List */}
-                  <div style={styles.langOptionsList} className="no-scrollbar">
+                  <div style={styles.langOptionsList} className="no-scrollbar profile-language-options">
                     {filteredLanguages.length === 0 ? (
                       <div style={styles.langEmptyState}>
                         No languages matching "{langSearchQuery}"
@@ -690,10 +698,10 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
               )}
             </div>
 
-            <div style={styles.cardFooterAction}>
+            <div style={styles.cardFooterAction} className="profile-card-footer">
               <div>
                 {languageSavedSuccess && (
-                  <span style={styles.profileSuccessToast}>
+                  <span style={styles.profileSuccessToast} className="profile-success-toast">
                     <IconCheck size={14} color="#146C2E" />
                     <span>{t('language_saved', selectedLanguage)}</span>
                   </span>
@@ -714,11 +722,11 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
           </div>
 
           {/* Card 4: Syscall Address Identity */}
-          <div style={styles.profileCard}>
+          <div style={styles.profileCard} className="profile-card">
             <label style={styles.cardHeaderLabel}>{t('syscall_address', savedLang)}</label>
-            <div style={styles.addressDisplayBox}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
-                <span style={styles.addressMonoText}>{currentUser.emailAddress}</span>
+            <div style={styles.addressDisplayBox} className="profile-address-box">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }} className="profile-address-content">
+                <span style={styles.addressMonoText} className="profile-address-text">{currentUser.emailAddress}</span>
                 <span
                   title="Verified Syscall Address"
                   data-tooltip="Verified Syscall Address"
@@ -740,10 +748,10 @@ export const DedicatedProfilePage: React.FC<DedicatedProfilePageProps> = ({
           </div>
 
           {/* Card 5: Mobile Carrier Number */}
-          <div style={styles.profileCard}>
+          <div style={styles.profileCard} className="profile-card">
             <span style={styles.cardHeaderLabel}>{t('carrier_number', savedLang)}</span>
 
-            <div style={styles.carrierInfoRow}>
+            <div style={styles.carrierInfoRow} className="profile-carrier-info">
               <span style={styles.carrierPhoneText}>
                 {carrierInfo.formattedNumber || `+91 ${currentUser.phone}`}
               </span>

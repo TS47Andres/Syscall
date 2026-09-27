@@ -33,6 +33,14 @@ export const IconInbox: React.FC<IconProps> = ({ size = 20, color = 'currentColo
   </svg>
 );
 
+export const IconArchive: React.FC<IconProps> = ({ size = 20, color = 'currentColor', style }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+    <rect x="3" y="4" width="18" height="4" rx="1"></rect>
+    <path d="M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"></path>
+    <path d="M10 12h4"></path>
+  </svg>
+);
+
 export const IconSent: React.FC<IconProps> = ({ size = 20, color = 'currentColor', style }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={style}>
     <line x1="22" y1="2" x2="11" y2="13"></line>

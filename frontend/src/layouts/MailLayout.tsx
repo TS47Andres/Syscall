@@ -3,7 +3,7 @@
  * Role: Composes the authenticated shell and wires compose actions to the API context.
  * Service: Frontend.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useMail } from '../context/MailContext';
 import { Header } from '../components/layout/Header';
@@ -13,6 +13,8 @@ import { FloatingComposeButton } from '../components/compose/FloatingComposeButt
 import { ComposeModal } from '../components/ComposeModal';
 
 export const MailLayout: React.FC = () => {
+  const [mobileSelectionToolbar, setMobileSelectionToolbar] = useState<React.ReactNode>(null);
+  const [isSearchFilterOpen, setIsSearchFilterOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const {
@@ -58,7 +60,7 @@ export const MailLayout: React.FC = () => {
   };
 
   return (
-    <div style={styles.appContainer} className="gmail-layout-container">
+    <div style={styles.appContainer} className={`gmail-layout-container ${isProfilePageOpen ? 'is-profile-page' : ''}`}>
       {/* 1. TOP HEADER */}
       <Header
         currentUser={currentUser}
@@ -68,6 +70,8 @@ export const MailLayout: React.FC = () => {
         onToggleSidebarCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
         onProfileClick={handleProfileClick}
         isProfilePageOpen={isProfilePageOpen}
+        mobileSelectionToolbar={mobileSelectionToolbar}
+        onFilterOpenChange={setIsSearchFilterOpen}
       />
 
       {/* 2. BODY WORKSPACE */}
@@ -103,7 +107,7 @@ export const MailLayout: React.FC = () => {
         />
 
         {/* Main Content Router Outlet */}
-        <Outlet />
+        <Outlet context={{ setMobileSelectionToolbar, isSearchFilterOpen }} />
       </div>
 
       {/* 3. MOVABLE FLOATING ACTION BUTTON */}

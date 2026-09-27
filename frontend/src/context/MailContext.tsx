@@ -38,7 +38,7 @@ interface MailContextType {
   handleToggleStar: (id: string, event?: React.MouseEvent) => void;
   handleToggleSpam: (id: string, spam: boolean) => void;
   handleMarkRead: (ids: string[], read: boolean) => Promise<void>;
-  handleBatchAction: (ids: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam') => Promise<void>;
+  handleBatchAction: (ids: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam' | 'archive' | 'unarchive') => Promise<void>;
   handleSendMail: (to: string, subject: string, body: string, attachments?: File[], replyToId?: string, draftId?: string) => Promise<void>;
   handleSaveDraft: (to: string, subject: string, body: string, attachments?: File[], draftId?: string) => Promise<void>;
   handleScheduleMail: (to: string, subject: string, body: string, scheduledAt: string, attachments?: File[]) => Promise<void>;
@@ -186,7 +186,7 @@ export const MailProvider: React.FC<MailProviderProps> = ({ initialUser, onSignO
   }, [loadMail]);
 
   // Executes a batch action across multiple messages with optimistic state updates.
-  const handleBatchAction = useCallback(async (ids: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam'): Promise<void> => {
+  const handleBatchAction = useCallback(async (ids: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam' | 'archive' | 'unarchive'): Promise<void> => {
     if (ids.length === 0) return;
     const nowIso = new Date().toISOString();
     if (action === 'read' || action === 'unread') {
@@ -197,6 +197,8 @@ export const MailProvider: React.FC<MailProviderProps> = ({ initialUser, onSignO
       setTrashIds((prev) => new Set([...prev, ...ids]));
     } else if (action === 'star') {
       setStarredIds((prev) => new Set([...prev, ...ids]));
+    } else if (action === 'archive' || action === 'unarchive') {
+      setEmails((prev) => prev.map((mail) => ids.includes(mail.publicId) ? { ...mail, isArchived: action === 'archive' } : mail));
     } else if (action === 'unstar') {
       setStarredIds((prev) => {
         const next = new Set(prev);

@@ -46,7 +46,7 @@ export const EmailRow: React.FC<EmailRowProps> = ({
   const isUnread = !email.readAt;
   const displayedAddress = folder === 'sent' ? email.recipientAddress : email.senderAddress;
 
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchStartPos = useRef<{ x: number; y: number } | null>(null);
   const longPressTriggered = useRef(false);
 

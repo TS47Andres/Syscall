@@ -135,6 +135,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
       scheduledAt: message.scheduledAt,
       isSpam: message.isSpam,
       isStarred,
+      isArchived: isSender ? Boolean(message.senderArchivedAt) : Boolean(message.recipientArchivedAt),
       isTrashed,
       readAt: isSender ? message.readAt ?? message.createdAt : message.readAt,
       createdAt: message.createdAt,
@@ -817,7 +818,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     const user = await requireUser(request);
     const body = z.object({
       publicIds: z.array(z.string()).min(1),
-      action: z.enum(['read', 'unread', 'trash', 'star', 'unstar', 'spam', 'unspam']),
+      action: z.enum(['read', 'unread', 'trash', 'star', 'unstar', 'spam', 'unspam', 'archive', 'unarchive']),
     }).parse(request.body);
 
     const emails = await Email.find({
@@ -846,6 +847,14 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
         case 'unstar':
           if (isSender) email.senderStarredAt = null;
           else email.recipientStarredAt = null;
+          break;
+        case 'archive':
+          if (isSender) email.senderArchivedAt = now;
+          else email.recipientArchivedAt = now;
+          break;
+        case 'unarchive':
+          if (isSender) email.senderArchivedAt = null;
+          else email.recipientArchivedAt = null;
           break;
         case 'spam':
           if (!isSender) email.isSpam = true;

@@ -349,6 +349,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     backgroundColor: 'var(--gmail-bg)',
+    borderRadius: '0 20px 20px 0',
     boxSizing: 'border-box',
     overflow: 'hidden',
     transition: 'width 0.2s cubic-bezier(0.4, 0, 0.2, 1), min-width 0.2s cubic-bezier(0.4, 0, 0.2, 1)',

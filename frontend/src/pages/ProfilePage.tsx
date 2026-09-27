@@ -1,9 +1,10 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useOutletContext } from 'react-router-dom';
 import { useMail } from '../context/MailContext';
 import { DedicatedProfilePage } from '../components/profile/DedicatedProfilePage';
 
 export const ProfilePage: React.FC = () => {
+  const { isSearchFilterOpen } = useOutletContext<{ isSearchFilterOpen: boolean }>();
   const navigate = useNavigate();
   const {
     currentUser,
@@ -26,6 +27,7 @@ export const ProfilePage: React.FC = () => {
         onUpdateProfileDetails={handleUpdateProfileDetails}
         onSignOut={handleSignOut}
         onBackToMail={handleBackToMail}
+        isSearchFilterOpen={isSearchFilterOpen}
       />
     </main>
   );

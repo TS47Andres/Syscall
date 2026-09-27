@@ -208,7 +208,14 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
   };
 
   return (
-    <div style={dockStyle} className={`syscall-compose-modal animate-fade-in ${isMinimized ? 'is-minimized' : ''}`}>
+    <>
+      {!isMinimized && <button
+        type="button"
+        className="compose-mobile-backdrop"
+        aria-label="Close compose window"
+        onClick={onClose}
+      />}
+      <div style={dockStyle} className={`syscall-compose-modal animate-fade-in ${isMinimized ? 'is-minimized' : ''}`}>
       {/* Header Bar - Draggable across entire page */}
       <div
         style={{
@@ -477,7 +484,8 @@ export const ComposeModal: React.FC<ComposeModalProps> = ({ initialTo = '', init
           </form>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 };
 

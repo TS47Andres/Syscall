@@ -59,9 +59,9 @@ export const OtpInputGroup: React.FC<OtpInputGroupProps> = ({
   };
 
   return (
-    <div style={styles.otpBoxesRow} onPaste={handleOtpPaste}>
+    <div style={styles.otpBoxesRow} className="auth-otp-row" onPaste={handleOtpPaste}>
       {/* First 3 Digits */}
-      <div style={styles.otpGroup}>
+      <div style={styles.otpGroup} className="auth-otp-group">
         {[0, 1, 2].map((idx) => {
           const digit = otpDigits[idx];
           const isFocused = focusedIdx === idx;
@@ -86,6 +86,7 @@ export const OtpInputGroup: React.FC<OtpInputGroupProps> = ({
                 backgroundColor: isFocused ? '#F0F4F9' : digit ? '#F8FAFD' : '#FFFFFF',
                 boxShadow: isFocused ? '0 0 0 3px rgba(11, 87, 208, 0.15)' : 'none',
               }}
+              className="auth-otp-box"
               autoFocus={idx === 0}
             />
           );
@@ -96,7 +97,7 @@ export const OtpInputGroup: React.FC<OtpInputGroupProps> = ({
       <span style={styles.otpDivider}>–</span>
 
       {/* Last 3 Digits */}
-      <div style={styles.otpGroup}>
+      <div style={styles.otpGroup} className="auth-otp-group">
         {[3, 4, 5].map((idx) => {
           const digit = otpDigits[idx];
           const isFocused = focusedIdx === idx;
@@ -121,6 +122,7 @@ export const OtpInputGroup: React.FC<OtpInputGroupProps> = ({
                 backgroundColor: isFocused ? '#F0F4F9' : digit ? '#F8FAFD' : '#FFFFFF',
                 boxShadow: isFocused ? '0 0 0 3px rgba(11, 87, 208, 0.15)' : 'none',
               }}
+              className="auth-otp-box"
             />
           );
         })}

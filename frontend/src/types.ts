@@ -48,6 +48,7 @@ export interface Email {
   createdAt: string;
   attachments?: Attachment[];
   isStarred?: boolean;
+  isArchived?: boolean;
   isTrashed?: boolean;
   deliveryStatus?: 'scheduled' | 'queued' | 'delivered' | 'failed' | 'cancelled';
   scheduledAt?: string | null;

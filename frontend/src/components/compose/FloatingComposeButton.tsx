@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconCompose, IconSarvamAI } from '../Icons';
+import { IconCompose } from '../Icons';
 import { useMail } from '../../context/MailContext';
 import { t } from '../../utils/i18n';
 
@@ -16,16 +16,6 @@ export const FloatingComposeButton: React.FC<FloatingComposeButtonProps> = ({
 
   return (
     <>
-      {/* Sarvam AI Logo / Launcher at Bottom Left Corner */}
-      <button
-        type="button"
-        className="sarvam-ai-fab"
-        title="Sarvam AI Agent (Coming soon)"
-        aria-label="Sarvam AI Agent"
-      >
-        <IconSarvamAI size={26} />
-      </button>
-
       {/* Compose Action Button at Bottom Right Corner */}
       <button
         className="gmail-fab"

@@ -88,6 +88,7 @@ const styles: Record<string, React.CSSProperties> = {
     bottom: 0,
     width: '285px',
     maxWidth: '85vw',
+    borderRadius: '0 22px 22px 0',
     backgroundColor: '#FFFFFF',
     zIndex: 999,
     display: 'flex',

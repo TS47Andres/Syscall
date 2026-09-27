@@ -21,6 +21,8 @@ interface HeaderProps {
   onToggleSidebarCollapse: () => void;
   onProfileClick: () => void;
   isProfilePageOpen: boolean;
+  mobileSelectionToolbar?: React.ReactNode;
+  onFilterOpenChange?: (isOpen: boolean) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -31,9 +33,15 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSidebarCollapse,
   onProfileClick,
   isProfilePageOpen,
+  mobileSelectionToolbar,
+  onFilterOpenChange,
 }) => {
   const { searchFilters, setSearchFilters, resetSearchFilters } = useMail();
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  useEffect(() => {
+    onFilterOpenChange?.(isFilterOpen);
+  }, [isFilterOpen, onFilterOpenChange]);
 
   const hasActiveFilters = Boolean(
     searchFilters.from ||
@@ -108,8 +116,12 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Center: Search Field */}
-      <div
+      {/* Center: Search Field, replaced by selected-message actions on mobile. */}
+      {isMobile && mobileSelectionToolbar ? (
+        <div className="gmail-mobile-selection-bar" aria-label="Selected message actions">
+          {mobileSelectionToolbar}
+        </div>
+      ) : <div
         style={{
           ...styles.searchBar,
           ...(isFilterOpen ? styles.searchBarExpanded : {}),
@@ -171,7 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
           onResetFilters={resetSearchFilters}
           currentLanguage={currentUser.language}
         />
-      </div>
+      </div>}
 
       {/* Right: Current Time + Sarvam AI Logo + Profile Avatar */}
       <div style={styles.rightArea} className={`gmail-header-right ${isFilterOpen ? 'hide-on-mobile-filter' : ''}`}>

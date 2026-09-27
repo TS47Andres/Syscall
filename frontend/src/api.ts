@@ -186,7 +186,7 @@ class SyscallApi {
   }
 
   // Executes a batch action across multiple messages.
-  async batchMailAction(publicIds: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam'): Promise<void> {
+  async batchMailAction(publicIds: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam' | 'archive' | 'unarchive'): Promise<void> {
     await this.request('/api/mail/batch-action', { method: 'POST', body: JSON.stringify({ publicIds, action }) });
   }
 

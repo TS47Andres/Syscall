@@ -4,12 +4,13 @@
  * Service: Frontend.
  */
 import React, { useMemo, useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { useMail } from '../context/MailContext';
 import type { Email } from '../types';
 import { api } from '../api';
 import { EmailList } from '../components/mail/EmailList';
 import { ReadingPane } from '../components/mail/ReadingPane';
+import { MobileSelectionToolbar } from '../components/mail/MobileSelectionToolbar';
 import {
   isPromoMail,
   isSocialMail,
@@ -19,6 +20,7 @@ import {
 } from '../utils/mailHelpers';
 
 export const MailPage: React.FC = () => {
+  const { setMobileSelectionToolbar } = useOutletContext<{ setMobileSelectionToolbar: (toolbar: React.ReactNode) => void }>();
   const { folder: rawFolder, mailId } = useParams<{ folder?: string; mailId?: string }>();
   const navigate = useNavigate();
   const folder = rawFolder || 'inbox';
@@ -84,7 +86,7 @@ export const MailPage: React.FC = () => {
           if (!isTrashed) return false;
         } else {
           if (isTrashed) return false;
-          if (activeFolderScope === 'inbox' && mail.recipientAddress !== currentUser.emailAddress) return false;
+          if (activeFolderScope === 'inbox' && (mail.recipientAddress !== currentUser.emailAddress || mail.isArchived)) return false;
           if (activeFolderScope === 'sent' && !mail.senderAddress.includes(currentUser.phone)) return false;
           if (activeFolderScope === 'drafts' && !mail.isDraft) return false;
           if (activeFolderScope === 'scheduled' && mail.deliveryStatus !== 'scheduled') return false;
@@ -98,6 +100,7 @@ export const MailPage: React.FC = () => {
         } else {
           // Non-bin views: exclude binned emails
           if (isTrashed) return false;
+          if (['inbox', 'promotions', 'social', 'updates'].includes(folder) && mail.isArchived) return false;
           if (mail.isDraft && folder !== 'drafts') return false;
           if (mail.deliveryStatus === 'scheduled' && folder !== 'scheduled') return false;
 
@@ -133,6 +136,7 @@ export const MailPage: React.FC = () => {
             if (!isUpdateMail(mail)) return false;
           } else if (folder === 'inbox') {
             if (mail.recipientAddress !== currentUser.emailAddress) return false;
+            if (mail.isArchived) return false;
             if (categoryTab === 'promotions' && !isPromoMail(mail)) return false;
             if (categoryTab === 'social' && !isSocialMail(mail)) return false;
             if (categoryTab === 'updates' && !isUpdateMail(mail)) return false;
@@ -304,6 +308,49 @@ export const MailPage: React.FC = () => {
     setCheckedEmailIds(new Set());
     void handleBatchAction(ids, spam ? 'spam' : 'unspam');
   };
+
+  const selectedIds = useMemo(() => Array.from(checkedEmailIds), [checkedEmailIds]);
+  const mobileSelectionToolbar = useMemo(() => {
+    if (selectedIds.length === 0) return null;
+    const selectedMessages = selectedIds.map((id) => emails.find((mail) => mail.publicId === id)).filter((mail): mail is Email => Boolean(mail));
+    const allRead = selectedMessages.length > 0 && selectedMessages.every((mail) => Boolean(mail.readAt));
+    const allArchived = selectedMessages.length > 0 && selectedMessages.every((mail) => Boolean(mail.isArchived));
+    const inBin = folder === 'bin' || folder === 'trash';
+    const canArchive = !inBin && folder !== 'spam' && folder !== 'sent' && folder !== 'drafts' && folder !== 'scheduled';
+    return (
+      <MobileSelectionToolbar
+        count={selectedIds.length}
+        canArchive={canArchive}
+        allRead={allRead}
+        allArchived={allArchived}
+        inBin={inBin}
+        canReportSpam={folder !== 'spam' && !inBin}
+        onClear={handleClearSelection}
+        onArchive={() => {
+          setCheckedEmailIds(new Set());
+          void handleBatchAction(selectedIds, allArchived ? 'unarchive' : 'archive');
+        }}
+        onDelete={() => {
+          setCheckedEmailIds(new Set());
+          if (inBin) selectedIds.forEach(handlePermanentDelete);
+          else void handleBatchAction(selectedIds, 'trash');
+        }}
+        onMarkRead={(read) => void handleMarkRead(selectedIds, read)}
+        onStar={() => void handleBatchAction(selectedIds, selectedMessages.every((mail) => starredIds.has(mail.publicId)) ? 'unstar' : 'star')}
+        onImportant={() => void handleBatchAction(selectedIds, 'star')}
+        onSpam={() => {
+          setCheckedEmailIds(new Set());
+          void handleBatchAction(selectedIds, 'spam');
+        }}
+      />
+    );
+  }, [selectedIds, emails, folder, handleBatchAction, handleMarkRead, handlePermanentDelete, handleClearSelection, starredIds]);
+
+  useEffect(() => {
+    setMobileSelectionToolbar(mobileSelectionToolbar);
+  }, [mobileSelectionToolbar, setMobileSelectionToolbar]);
+
+  useEffect(() => () => setMobileSelectionToolbar(null), [setMobileSelectionToolbar]);
 
   const handleBatchLabel = (action: 'important' | 'inbox' | 'spam' | 'trash') => {
     const ids = Array.from(checkedEmailIds);

@@ -47,6 +47,8 @@ export interface EmailDocument extends Document {
   isSpam: boolean;
   senderStarredAt: Date | null;
   recipientStarredAt: Date | null;
+  senderArchivedAt: Date | null;
+  recipientArchivedAt: Date | null;
   readAt: Date | null;
   senderDeletedAt: Date | null;
   recipientDeletedAt: Date | null;
@@ -149,6 +151,8 @@ const emailSchema = new Schema<EmailDocument>({
   isSpam: { type: Boolean, default: false, index: true },
   senderStarredAt: { type: Date, default: null },
   recipientStarredAt: { type: Date, default: null },
+  senderArchivedAt: { type: Date, default: null },
+  recipientArchivedAt: { type: Date, default: null },
   readAt: { type: Date, default: null, index: true },
   senderDeletedAt: { type: Date, default: null },
   recipientDeletedAt: { type: Date, default: null },

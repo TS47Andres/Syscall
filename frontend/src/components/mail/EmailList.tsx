@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { Email } from '../../types';
 import type { TabCategory } from './CategoryTabs';
 import { EmailRow } from './EmailRow';
@@ -89,20 +90,38 @@ export const EmailList: React.FC<EmailListProps> = ({
   const [menuCoords, setMenuCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const checkedCount = checkedEmailIds.size;
+  const allSelected = emails.length > 0 && emails.every((e) => checkedEmailIds.has(e.publicId));
 
-  // Position the fixed menu reliably right below the three-dot button
+  // Keep the menu aligned with its trigger and inside the visible viewport.
+  const updateMenuPosition = useCallback(() => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    const menuWidth = 220;
+    const menuHeight = menuRef.current?.getBoundingClientRect().height ?? 0;
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - menuWidth - 12));
+    const below = rect.bottom + 6;
+    const top = menuHeight > 0 && below + menuHeight > window.innerHeight - 12
+      ? Math.max(12, rect.top - menuHeight - 6)
+      : below;
+    setMenuCoords({ top, left });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isMenuOpen) return;
+    updateMenuPosition();
+    const handleViewportChange = () => updateMenuPosition();
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
+    return () => {
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
+    };
+  }, [isMenuOpen, checkedCount, updateMenuPosition]);
+
   const handleToggleMenu = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
-    if (!isMenuOpen && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      const menuWidth = 210;
-      const left = Math.max(12, Math.min(rect.left, window.innerWidth - menuWidth - 12));
-      setMenuCoords({
-        top: rect.bottom + 6,
-        left,
-      });
-    }
     setIsMenuOpen((v) => !v);
   };
 
@@ -124,9 +143,6 @@ export const EmailList: React.FC<EmailListProps> = ({
       document.removeEventListener('touchstart', onDocClick);
     };
   }, [isMenuOpen]);
-
-  const checkedCount = checkedEmailIds.size;
-  const allSelected = emails.length > 0 && emails.every((e) => checkedEmailIds.has(e.publicId));
 
   const getFolderTitle = () => {
     switch (folder) {
@@ -205,7 +221,7 @@ export const EmailList: React.FC<EmailListProps> = ({
       }}
     >
       {/* Single Unified Header Row: Checkbox, 3-dots, and Category Chips / Folder title */}
-      <div className="gmail-cat-tabs-row no-scrollbar" style={styles.unifiedHeaderRow}>
+      <div className="gmail-cat-tabs-row no-scrollbar" style={{ ...styles.unifiedHeaderRow, display: checkedCount > 0 && isMobile ? 'none' : 'flex' }}>
         {/* Master Select All Checkbox (DESKTOP ONLY - hidden on mobile responsive) */}
         {!isMobile && (
           <button
@@ -249,16 +265,19 @@ export const EmailList: React.FC<EmailListProps> = ({
           onClick={handleToggleMenu}
           title="Options"
           aria-label="Options"
+          aria-haspopup="menu"
+          aria-expanded={isMenuOpen}
           style={styles.threeDotBtn}
         >
           <IconMoreVertical size={18} color="#444746" />
         </button>
 
-        {/* Fixed position Three-Dot Options Dropdown - completely immune to parent overflow clipping */}
-        {isMenuOpen && (
+        {/* Render the menu outside the scrolling toolbar so it stays fully visible. */}
+        {isMenuOpen && createPortal(
           <div
             ref={menuRef}
             className="gmail-dropdown-menu"
+            role="menu"
             style={{
               ...styles.dropdownMenu,
               top: `${menuCoords.top}px`,
@@ -397,7 +416,8 @@ export const EmailList: React.FC<EmailListProps> = ({
                 </button>
               </>
             )}
-          </div>
+          </div>,
+          document.body,
         )}
 
         {/* Vertical Divider */}
@@ -614,6 +634,8 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '6px 0',
     display: 'flex',
     flexDirection: 'column',
+    maxHeight: 'calc(100vh - 24px)',
+    overflowY: 'auto',
   },
   dropdownItem: {
     display: 'flex',

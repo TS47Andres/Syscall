@@ -30,6 +30,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   onNavigateMode,
 }) => {
   const resetToken = new URLSearchParams(window.location.search).get('token');
+  const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= 900 : false
+  );
   const [mode, setMode] = useState<'signin' | 'create'>(initialMode);
   const [subStep, setSubStep] = useState<'form' | 'otp' | 'call-requested' | 'password' | 'reset'>(
     resetToken ? 'reset' : 'form'
@@ -39,6 +42,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setMode(initialMode);
     setSubStep(resetToken ? 'reset' : 'form');
   }, [initialMode, resetToken]);
+
+  useEffect(() => {
+    const updateViewport = () => setIsCompactViewport(window.innerWidth <= 900);
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
+  }, []);
 
   // Form State
   const [fullName, setFullName] = useState<string>('');
@@ -301,17 +310,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       {/* Left 30% Panel: Holds the exact Sign In / Create Account Card */}
       <div style={styles.authLeftPanel} className="auth-left-panel">
         {/* Top-Left Brand Header */}
-        <div style={styles.panelTopBrand}>
+        <div style={styles.panelTopBrand} className="auth-panel-top-brand">
           <SyscallLogo size={38} />
           <span style={styles.panelTopBrandText}>Syscall</span>
         </div>
 
-        <div style={styles.authCardWrapper}>
+        <div style={styles.authCardWrapper} className="auth-card-wrapper">
           {/* Clean Google-Style Card */}
-          <div style={styles.centeredCard} className="animate-fade-in">
+          <div style={styles.centeredCard} className="auth-centered-card animate-fade-in">
             {/* CARD TITLE & SUBTITLE */}
-            <div style={styles.centeredHeader}>
-              <h1 style={styles.googleTitle}>
+            <div style={styles.centeredHeader} className="auth-centered-header">
+              <h1 style={styles.googleTitle} className="auth-google-title">
                 {subStep === 'otp'
                   ? 'Verify your phone'
                   : subStep === 'password'
@@ -337,7 +346,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               ) : null}
 
               {subStep === 'otp' && (
-                <div style={styles.accountIdentityPill}>
+                <div style={styles.accountIdentityPill} className="auth-account-identity-pill">
                   <div style={styles.accountPillAvatar}>
                     {previewUser?.avatarUrl ? (
                       <img
@@ -349,7 +358,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       getInitials(previewUser?.name || fullName || 'User')
                     )}
                   </div>
-                  <span style={styles.accountPillText}>
+                  <span style={styles.accountPillText} className="auth-account-pill-text">
                     {(previewUser?.name || fullName) ? `${previewUser?.name || fullName} · ` : ''}+91 {raw10}
                   </span>
                   <button
@@ -374,7 +383,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             {/* 1. CREATE ACCOUNT FORM */}
             {mode === 'create' && subStep === 'form' && (
-              <form onSubmit={handleRequestVoiceSetup} style={styles.formStack}>
+              <form onSubmit={handleRequestVoiceSetup} style={styles.formStack} className="auth-form-stack">
                 {/* Full Name */}
                 <div style={styles.inputWrapper}>
                   <label style={styles.fieldLabel}>Full name</label>
@@ -385,7 +394,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="e.g. Your Name"
                       style={{ ...styles.phoneInputField, paddingLeft: 14 }}
-                      autoFocus
+                      autoFocus={!isCompactViewport}
                     />
                   </div>
                 </div>
@@ -436,7 +445,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             {/* 2. SIGN IN FORM */}
             {mode === 'signin' && subStep === 'form' && (
-              <form onSubmit={handleSignInNext} style={styles.formStack}>
+              <form onSubmit={handleSignInNext} style={styles.formStack} className="auth-form-stack">
                 {/* Phone */}
                 <div style={styles.inputWrapper}>
                   <label style={styles.fieldLabel}>Mobile number</label>
@@ -456,7 +465,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       placeholder="10-digit mobile number"
                       maxLength={14}
                       style={styles.phoneInputField}
-                      autoFocus
+                      autoFocus={!isCompactViewport}
                     />
                   </div>
                   {errorMessage && signInWithOtp && (
@@ -500,7 +509,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </div>
                     )}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }} className="auth-account-links">
                       <button
                         type="button"
                         style={styles.textActionBtnSmall}
@@ -518,7 +527,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       </button>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 2 }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 2 }}>
                       <button
                         type="button"
                         style={styles.textActionBtnSmall}
@@ -576,6 +585,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                   void handleVerifyOtp();
                 }}
                 style={styles.formStack}
+                className="auth-form-stack"
               >
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', width: '100%' }}>
                   <span style={styles.fieldLabel}>Enter 6-digit verification code</span>
@@ -639,7 +649,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             {/* 4. SET PASSWORD SUBSTEP */}
             {subStep === 'password' && (
-              <form onSubmit={handleSetPassword} style={styles.formStack}>
+              <form onSubmit={handleSetPassword} style={styles.formStack} className="auth-form-stack">
                 <div style={styles.inputWrapper}>
                   <label style={styles.fieldLabel}>New password</label>
                   <div style={styles.materialOutlineField}>
@@ -651,7 +661,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="At least 8 characters"
                       style={{ ...styles.phoneInputField, paddingLeft: 14 }}
-                      autoFocus
+                      autoFocus={!isCompactViewport}
                     />
                     <button
                       type="button"
@@ -677,7 +687,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             {/* 5. RESET PASSWORD FROM URL TOKEN SUBSTEP */}
             {subStep === 'reset' && (
-              <form onSubmit={handleCompleteReset} style={styles.formStack}>
+              <form onSubmit={handleCompleteReset} style={styles.formStack} className="auth-form-stack">
                 <div style={styles.inputWrapper}>
                   <label style={styles.fieldLabel}>New password</label>
                   <div style={styles.materialOutlineField}>
@@ -689,7 +699,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="At least 8 characters"
                       style={{ ...styles.phoneInputField, paddingLeft: 14 }}
-                      autoFocus
+                      autoFocus={!isCompactViewport}
                     />
                     <button
                       type="button"
@@ -717,7 +727,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             {/* 6. CALL REQUESTED NOTICE SUBSTEP */}
             {subStep === 'call-requested' && (
-              <div style={styles.formStack}>
+              <div style={styles.formStack} className="auth-form-stack">
                 <div style={styles.otpNoticeBox}>
                   Your automated onboarding call has been requested. When your phone rings, the voice assistant will confirm your name <strong>"{fullName.trim()}"</strong> and complete your account creation. You can set your password later from the Sign in page.
                 </div>

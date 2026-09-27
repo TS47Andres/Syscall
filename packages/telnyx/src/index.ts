@@ -9,6 +9,11 @@ import type { AppConfig } from '@syscall/config';
 export interface TelnyxCallInput { phoneE164: string; webhookUrl: string; streamUrl: string; }
 export interface TelnyxMessageInput { to: string; text: string; }
 
+// Builds the Telnyx media stream options shared by inbound and outbound calls.
+function streamOptions(streamUrl: string): Record<string, unknown> {
+  return { stream_url: streamUrl, stream_track: 'inbound_track', stream_codec: 'PCMU', stream_bidirectional_mode: 'rtp', stream_bidirectional_codec: 'PCMU' };
+}
+
 // Ensures provider-dependent actions explain exactly which integration is missing.
 function requireTelnyx(config: AppConfig): void {
   if (!config.TELNYX_API_KEY || !config.TELNYX_PHONE_NUMBER || !config.TELNYX_CONNECTION_ID || !config.TELNYX_MESSAGING_PROFILE_ID || !config.PUBLIC_WEBHOOK_BASE_URL) throw new Error('Telnyx is not configured. Set TELNYX_API_KEY, TELNYX_PHONE_NUMBER, TELNYX_CONNECTION_ID, TELNYX_MESSAGING_PROFILE_ID, and PUBLIC_WEBHOOK_BASE_URL in .env.');
@@ -31,11 +36,37 @@ export async function startOutboundCall(config: AppConfig, input: TelnyxCallInpu
     webhook_url: input.webhookUrl,
     webhook_url_method: 'POST',
     webhook_api_version: '2',
-    stream_url: input.streamUrl,
-    stream_track: 'inbound_track',
-    stream_codec: 'PCMU',
-    stream_bidirectional_mode: 'rtp',
-    stream_bidirectional_codec: 'PCMU',
+    ...streamOptions(input.streamUrl),
+  });
+}
+
+// Answers a Telnyx inbound call before attaching the voice-agent media stream.
+export async function answerInboundCall(config: AppConfig, callControlId: string): Promise<Record<string, unknown>> {
+  return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/answer`, { command_id: crypto.randomUUID() });
+}
+
+// Starts the bidirectional media stream on an answered inbound Telnyx call.
+export async function startCallStreaming(config: AppConfig, callControlId: string, streamUrl: string): Promise<Record<string, unknown>> {
+  return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/streaming_start`, { command_id: crypto.randomUUID(), ...streamOptions(streamUrl) });
+}
+
+// Speaks the OTP prompt and collects six keypad digits followed by #.
+export async function gatherOtpDigits(config: AppConfig, callControlId: string, gatherId: string, prompt: string): Promise<Record<string, unknown>> {
+  return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/gather_using_speak`, {
+    command_id: crypto.randomUUID(),
+    client_state: Buffer.from(JSON.stringify({ gatherId })).toString('base64'),
+    payload: prompt,
+    payload_type: 'text',
+    voice: 'Telnyx.NaturalHD.astra',
+    language: 'en-IN',
+    service_level: 'premium',
+    minimum_digits: 7,
+    maximum_digits: 7,
+    terminating_digit: '',
+    valid_digits: '0123456789#',
+    maximum_tries: 1,
+    inter_digit_timeout_millis: 15000,
+    timeout_millis: 60000,
   });
 }
 

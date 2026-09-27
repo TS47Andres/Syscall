@@ -13,7 +13,7 @@ import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import { AuditLog, Draft, Email, User, WebhookEvent, pingDatabase, type UserDocument } from '@syscall/db';
 import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue, queueEmailFailureSms } from '@syscall/queues';
-import { hangupCall, startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
+import { answerInboundCall, gatherOtpDigits, hangupCall, startCallStreaming, startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
 import { isTelnyxConfigured } from '@syscall/config';
 import { toLocalAddress, toPhoneE164, addressSchema, passwordSchema, phone10Schema, phoneSchema, resolveScheduleTime, scheduleTimeZone } from '@syscall/validation';
 import { removeGeneratedFile, scanWithClamAv, writeGeneratedFile } from '@syscall/mail';
@@ -22,6 +22,8 @@ import { createLogger } from '@syscall/logging';
 import { audit, cancelScheduledEmail, createSession, ensureUserForPhone, hashPassword, hashSecret, persistAttachments, purgeEmail, queueEmail, queueSms, requestOtp, requestPasswordReset, resolveSession, rescheduleEmail, revokeAllSessions, revokeSession, scheduleEmail, verifyOtp, type ServiceContext } from './services.js';
 
 const voiceEmailDraftTtlSeconds = 15 * 60;
+const inboundOtpPerCallAttempts = 3;
+const inboundOtpDailySendLimit = 5;
 
 // Builds the Fastify application with all shared dependencies explicitly provided.
 export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: FastifyInstance; context: ServiceContext }> {
@@ -487,21 +489,26 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     const ticketKey = `voice:stream-ticket:${hashSecret(body.ticket)}`;
     const ticket = await redis.getdel(ticketKey);
     if (!ticket) throw httpError(401, 'Voice stream ticket is invalid or expired.');
-    const ticketData = JSON.parse(ticket) as { phoneE164: string; purpose?: string; displayName?: string };
+    const ticketData = JSON.parse(ticket) as { phoneE164: string; direction?: string; purpose?: string; displayName?: string };
     const phoneE164 = toPhoneE164(body.phone);
     if (ticketData.phoneE164 !== phoneE164) throw httpError(401, 'Voice stream did not match the requested call.');
     const callKey = `voice:call:${body.callControlId}`;
     const call = await redis.get(callKey);
     if (!call || (JSON.parse(call) as { phoneE164: string }).phoneE164 !== phoneE164) throw httpError(401, 'Voice call is not active.');
-    const context = JSON.parse(call) as { purpose?: string; displayName?: string };
-    return { status: 'active', purpose: context.purpose ?? ticketData.purpose ?? 'general', displayName: context.displayName ?? ticketData.displayName ?? '' };
+    const context = JSON.parse(call) as { direction?: string; verified?: boolean; purpose?: string; displayName?: string; setupPhase?: string };
+    if ((ticketData.direction ?? 'outbound') !== (context.direction ?? 'outbound')) throw httpError(401, 'Voice stream direction did not match the call.');
+    if (context.direction === 'inbound' && context.verified !== true) throw httpError(401, 'Inbound caller has not passed phone verification.');
+    return { status: 'active', direction: context.direction ?? 'outbound', verified: context.verified ?? true, purpose: context.purpose ?? ticketData.purpose ?? 'general', displayName: context.displayName ?? ticketData.displayName ?? '', setupPhase: context.setupPhase ?? '' };
   });
 
   // Returns an authoritative clock and timezone only for a live authenticated voice call.
   app.post('/internal/voice/time-context', async (request) => {
     requireVoiceAgent(request);
     const body = z.object({ callControlId: z.string().min(10) }).parse(request.body);
-    if (!await redis.exists(`voice:call:${body.callControlId}`)) throw httpError(401, 'Voice call is not active.');
+    const call = await redis.get(`voice:call:${body.callControlId}`);
+    if (!call) throw httpError(401, 'Voice call is not active.');
+    const callContext = JSON.parse(call) as { direction?: string; verified?: boolean };
+    if (callContext.direction === 'inbound' && callContext.verified !== true) throw httpError(401, 'Inbound caller has not passed phone verification.');
     const now = new Date();
     const localTime = new Intl.DateTimeFormat('en-IN', { dateStyle: 'full', timeStyle: 'long', timeZone: scheduleTimeZone }).format(now);
     return { now: now.toISOString(), timeZone: scheduleTimeZone, localTime };
@@ -510,11 +517,12 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   // Executes narrow account, mail, and call-control actions for a verified voice call.
   app.post('/internal/voice/actions', async (request) => {
     requireVoiceAgent(request);
-    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['confirm_account_name', 'authorize_account_create', 'create_account', 'request_password_reset', 'end_call', 'prepare_email', 'prepare_scheduled_email', 'send_email', 'schedule_email', 'discard_email', 'list_scheduled_emails', 'cancel_scheduled_email', 'reschedule_scheduled_email']), displayName: z.string().trim().min(2).max(100).optional(), recipientPhone: phone10Schema.optional(), subject: z.string().max(998).optional(), textBody: z.string().max(12000).optional(), draftId: z.string().uuid().optional(), emailId: z.string().optional(), scheduledAt: z.string().optional(), delaySeconds: z.number().int().optional() }).parse(request.body);
+    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['set_account_name', 'confirm_account_name', 'authorize_account_create', 'create_account', 'request_password_reset', 'end_call', 'prepare_email', 'prepare_scheduled_email', 'send_email', 'schedule_email', 'discard_email', 'list_scheduled_emails', 'cancel_scheduled_email', 'reschedule_scheduled_email']), displayName: z.string().trim().min(2).max(100).optional(), recipientPhone: phone10Schema.optional(), subject: z.string().max(998).optional(), textBody: z.string().max(12000).optional(), draftId: z.string().uuid().optional(), emailId: z.string().optional(), scheduledAt: z.string().optional(), delaySeconds: z.number().int().optional() }).parse(request.body);
     const call = await redis.get(`voice:call:${body.callControlId}`);
     if (!call) throw httpError(401, 'Voice call is not active.');
-    const callContext = JSON.parse(call) as { phoneE164: string; purpose?: string; displayName?: string; setupPhase?: string; confirmedName?: string };
+    const callContext = JSON.parse(call) as { phoneE164: string; direction?: string; verified?: boolean; purpose?: string; displayName?: string; setupPhase?: string; confirmedName?: string };
     const { phoneE164 } = callContext;
+    if (callContext.direction === 'inbound' && callContext.verified !== true && body.action !== 'end_call') throw httpError(403, 'Verify the inbound phone number before using personal voice actions.');
     const actionKey = `voice:action:${body.callControlId}:${body.actionId}`;
     const claimed = await redis.set(actionKey, 'processing', 'EX', 3600, 'NX');
     if (!claimed) {
@@ -524,9 +532,15 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     }
     try {
       let result: Record<string, unknown> = { action: body.action, status: 'not_allowed' };
-      if (body.action === 'confirm_account_name') {
+      if (body.action === 'set_account_name') {
+        if (callContext.purpose !== 'account_setup' || !['collect_name', 'confirm_name'].includes(callContext.setupPhase ?? '') || !body.displayName) throw httpError(409, 'A new account name is not expected for this call.');
+        callContext.displayName = body.displayName;
+        callContext.setupPhase = 'confirm_name';
+        await redis.set(`voice:call:${body.callControlId}`, JSON.stringify(callContext), 'EX', 21600);
+        result = { action: body.action, status: 'name_captured', displayName: callContext.displayName };
+      } else if (body.action === 'confirm_account_name') {
         if (callContext.purpose !== 'account_setup' || !body.displayName) throw httpError(409, 'Account name confirmation is not expected for this call.');
-        if (callContext.setupPhase === 'confirm_name') {
+        if (callContext.setupPhase === 'confirm_name' && callContext.displayName === body.displayName) {
           callContext.confirmedName = body.displayName;
           callContext.setupPhase = 'awaiting_create_prompt';
           await redis.set(`voice:call:${body.callControlId}`, JSON.stringify(callContext), 'EX', 21600);
@@ -663,7 +677,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   app.post('/internal/voice/sessions/close', async (request) => {
     requireVoiceAgent(request);
     const body = z.object({ callControlId: z.string().min(10) }).parse(request.body);
-    await redis.del(`voice:call:${body.callControlId}`, `voice:pending-email:${body.callControlId}`);
+    await redis.del(`voice:call:${body.callControlId}`, `voice:pending-email:${body.callControlId}`, `voice:otp:${body.callControlId}`, `voice:otp-gather:${body.callControlId}`);
     return { status: 'closed' };
   });
 
@@ -861,12 +875,157 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   app.post('/webhooks/telnyx/voice', async (request) => handleTelnyxWebhook(request, 'voice'));
   app.post('/webhooks/telnyx/sms', async (request) => handleTelnyxWebhook(request, 'sms'));
 
+  // Builds a one-use public media URL for an already verified inbound caller.
+  function voiceStreamUrl(ticket: string): string {
+    if (!config.PUBLIC_WEBHOOK_BASE_URL) throw httpError(503, 'Public voice URL is not configured.');
+    const streamBase = new URL(config.PUBLIC_WEBHOOK_BASE_URL);
+    if (streamBase.protocol !== 'https:') throw httpError(503, 'Public voice URL must use HTTPS.');
+    streamBase.protocol = 'wss:';
+    streamBase.pathname = `${streamBase.pathname.replace(/\/$/, '')}/voice-stream`;
+    streamBase.search = '';
+    streamBase.hash = '';
+    streamBase.searchParams.set('ticket', ticket);
+    return streamBase.toString();
+  }
+
+  // Starts number verification for a new inbound Telnyx call without activating user tools.
+  async function beginInboundCall(payload: Record<string, unknown>): Promise<void> {
+    const callControlId = typeof payload.call_control_id === 'string' ? payload.call_control_id : '';
+    const from = typeof payload.from === 'string' ? payload.from : '';
+    const to = typeof payload.to === 'string' ? payload.to : '';
+    const incomingDirection = String(payload.direction ?? '').toLowerCase();
+    const normalizeNumber = (value: string) => value.replace(/\D/g, '');
+    if (!callControlId || !from || !to || !config.TELNYX_PHONE_NUMBER || normalizeNumber(to) !== normalizeNumber(config.TELNYX_PHONE_NUMBER) || (incomingDirection && !['incoming', 'inbound'].includes(incomingDirection))) return;
+    if (!config.VOICE_AGENT_API_TOKEN || !config.PUBLIC_WEBHOOK_BASE_URL) throw httpError(503, 'Inbound voice is not configured.');
+    let phoneE164: string;
+    try { phoneE164 = toPhoneE164(from); }
+    catch { await hangupCall(config, callControlId); return; }
+    const callKey = `voice:call:${callControlId}`;
+    if (await redis.exists(callKey)) return;
+    const cooldownKey = `voice:inbound-otp-cooldown:${phoneE164}`;
+    const dailyKey = `voice:inbound-otp-daily:${phoneE164}:${new Date().toISOString().slice(0, 10)}`;
+    if (await redis.exists(cooldownKey)) {
+      await hangupCall(config, callControlId);
+      return;
+    }
+    const sentToday = await redis.incr(dailyKey);
+    if (sentToday === 1) await redis.expire(dailyKey, 24 * 60 * 60);
+    if (sentToday > inboundOtpDailySendLimit) {
+      await redis.decr(dailyKey);
+      await hangupCall(config, callControlId);
+      return;
+    }
+    const otp = crypto.randomInt(100000, 1000000).toString();
+    const otpTtlSeconds = config.OTP_EXPIRY_MINUTES * 60;
+    const callContext = { phoneE164, direction: 'inbound', purpose: 'inbound_verification', verified: false, otpAttempts: 0, createdAt: Date.now() };
+    const claimedCall = await redis.set(callKey, JSON.stringify(callContext), 'EX', Math.max(otpTtlSeconds, 300), 'NX');
+    if (claimedCall !== 'OK') {
+      await redis.decr(dailyKey);
+      return;
+    }
+    const otpKey = `voice:otp:${callControlId}`;
+    await redis.set(otpKey, JSON.stringify({ hash: hashSecret(`${callControlId}:${otp}`), expiresAt: Date.now() + otpTtlSeconds * 1000 }), 'EX', otpTtlSeconds);
+    await redis.set(cooldownKey, '1', 'EX', config.OTP_RESEND_COOLDOWN_SECONDS);
+    try {
+      await queueSms(context, { phoneE164, body: `Your Syscall call verification code is ${otp}. It expires in ${config.OTP_EXPIRY_MINUTES} minutes. Do not share it with anyone.` });
+      await answerInboundCall(config, callControlId);
+      const gatherId = crypto.randomUUID();
+      await redis.set(`voice:otp-gather:${callControlId}`, gatherId, 'EX', otpTtlSeconds);
+      await gatherOtpDigits(config, callControlId, gatherId, 'To verify your phone number, enter the six-digit code we just texted you, then press pound.');
+      logger.info({ callControlId }, 'Started inbound phone verification');
+    } catch (error) {
+      await redis.del(callKey, otpKey, `voice:otp-gather:${callControlId}`, cooldownKey);
+      await redis.decr(dailyKey);
+      await hangupCall(config, callControlId).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  // Verifies a DTMF OTP and only then starts the personal voice-agent session.
+  async function completeInboundOtp(payload: Record<string, unknown>): Promise<void> {
+    const callControlId = typeof payload.call_control_id === 'string' ? payload.call_control_id : '';
+    let gatherId = '';
+    if (typeof payload.client_state === 'string') {
+      try { gatherId = String((JSON.parse(Buffer.from(payload.client_state, 'base64').toString('utf8')) as { gatherId?: unknown }).gatherId ?? ''); } catch { /* Ignore malformed provider state. */ }
+    }
+    if (!callControlId || !gatherId) return;
+    const expectedGatherId = await redis.get(`voice:otp-gather:${callControlId}`);
+    if (!expectedGatherId || expectedGatherId !== gatherId) return;
+    const callKey = `voice:call:${callControlId}`;
+    const callValue = await redis.get(callKey);
+    if (!callValue) return;
+    const callContext = JSON.parse(callValue) as { phoneE164: string; direction: string; purpose: string; verified: boolean; otpAttempts: number; createdAt: number };
+    if (callContext.direction !== 'inbound' || callContext.verified || callContext.purpose !== 'inbound_verification') return;
+    const otpKey = `voice:otp:${callControlId}`;
+    const otpValue = await redis.get(otpKey);
+    const gatheredDigits = typeof payload.digits === 'string' ? payload.digits : '';
+    const otp = gatheredDigits.endsWith('#') ? gatheredDigits.slice(0, -1) : '';
+    const stored = otpValue ? JSON.parse(otpValue) as { hash: string; expiresAt: number } : null;
+    const isValid = Boolean(payload.status === 'valid' && stored && stored.expiresAt >= Date.now() && /^\d{6}#$/.test(gatheredDigits) && hashSecret(`${callControlId}:${otp}`) === stored.hash);
+    await redis.del(`voice:otp-gather:${callControlId}`);
+    if (!isValid) {
+      const attempts = callContext.otpAttempts + 1;
+      const dailyFailedKey = `otp:failed:${callContext.phoneE164}:${new Date().toISOString().slice(0, 10)}`;
+      const dailyFailures = await redis.incr(dailyFailedKey);
+      if (dailyFailures === 1) await redis.expire(dailyFailedKey, 24 * 60 * 60);
+      if (attempts >= inboundOtpPerCallAttempts || dailyFailures >= config.OTP_MAX_FAILED_ATTEMPTS_PER_DAY || !stored || stored.expiresAt < Date.now()) {
+        await redis.del(callKey, otpKey);
+        await hangupCall(config, callControlId).catch(() => undefined);
+        logger.info({ callControlId }, 'Inbound phone verification ended after an invalid or expired code');
+        return;
+      }
+      callContext.otpAttempts = attempts;
+      const nextGatherId = crypto.randomUUID();
+      await redis.set(callKey, JSON.stringify(callContext), 'EX', Math.max(1, Math.ceil((stored.expiresAt - Date.now()) / 1000)));
+      await redis.set(`voice:otp-gather:${callControlId}`, nextGatherId, 'EX', Math.max(1, Math.ceil((stored.expiresAt - Date.now()) / 1000)));
+      try {
+        await gatherOtpDigits(config, callControlId, nextGatherId, 'That code was not accepted. Please enter the six-digit code from your text message, then press pound.');
+      } catch (error) {
+        await redis.del(callKey, otpKey, `voice:otp-gather:${callControlId}`);
+        await hangupCall(config, callControlId).catch(() => undefined);
+        throw error;
+      }
+      return;
+    }
+
+    await redis.del(otpKey);
+    const existingUser = await User.findOne({ phoneE164: callContext.phoneE164, accountStatus: 'active' });
+    const purpose = existingUser ? 'general' : 'account_setup';
+    const updatedContext = {
+      ...callContext,
+      verified: true,
+      purpose,
+      displayName: existingUser?.displayName ?? '',
+      ...(existingUser ? {} : { setupPhase: 'collect_name' }),
+    };
+    await redis.set(callKey, JSON.stringify(updatedContext), 'EX', 21600);
+    const streamTicket = cryptoRandomToken();
+    await redis.set(`voice:stream-ticket:${hashSecret(streamTicket)}`, JSON.stringify({ phoneE164: callContext.phoneE164, direction: 'inbound', purpose }), 'EX', 300);
+    try {
+      await startCallStreaming(config, callControlId, voiceStreamUrl(streamTicket));
+      await audit('inbound_voice_verified', existingUser?._id ?? null, existingUser ? [existingUser.publicId] : [], { phone10Digit: callContext.phoneE164.slice(3) });
+      logger.info({ callControlId }, 'Inbound caller verified; started voice-agent stream');
+    } catch (error) {
+      await redis.del(callKey, `voice:stream-ticket:${hashSecret(streamTicket)}`);
+      await hangupCall(config, callControlId).catch(() => undefined);
+      throw error;
+    }
+  }
+
   // Processes a verified provider event exactly once before invoking provider-specific behavior.
   async function handleTelnyxWebhook(request: FastifyRequest, kind: 'voice' | 'sms'): Promise<Record<string, unknown>> {
     const rawBody = (request as RawBodyRequest).rawBody ?? JSON.stringify(request.body ?? {}); const signature = request.headers['telnyx-signature-ed25519']; const timestamp = request.headers['telnyx-timestamp']; const signatureValue = Array.isArray(signature) ? signature[0] : signature; const timestampValue = Array.isArray(timestamp) ? timestamp[0] : timestamp;
     if (!verifyWebhookSignature(config, rawBody, signatureValue, timestampValue)) throw httpError(401, 'Invalid Telnyx webhook signature.');
     const event = request.body as { data?: { id?: string; event_type?: string; payload?: Record<string, unknown> } }; const eventId = event.data?.id; if (!eventId) return { received: true };
     const eventType = event.data?.event_type ?? kind;
+    if (await WebhookEvent.exists({ providerEventId: eventId })) return { received: true, duplicate: true };
+    const payload = event.data?.payload ?? {};
+    if (eventType === 'call.initiated') await beginInboundCall(payload);
+    else if (eventType === 'call.gather.ended') await completeInboundOtp(payload);
+    else if (eventType === 'call.hangup' && typeof payload.call_control_id === 'string') {
+      const callControlId = payload.call_control_id;
+      await redis.del(`voice:call:${callControlId}`, `voice:pending-email:${callControlId}`, `voice:otp:${callControlId}`, `voice:otp-gather:${callControlId}`);
+    }
     try { await WebhookEvent.create({ providerEventId: eventId, eventType }); } catch (error) { if ((error as { code?: number }).code === 11000) return { received: true, duplicate: true }; throw error; }
     if (eventType === 'call.hangup') logger.info({ eventId }, 'Telnyx confirmed voice call hang-up');
     else logger.debug({ eventType, eventId }, 'Recorded Telnyx webhook event');

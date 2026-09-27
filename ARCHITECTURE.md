@@ -78,8 +78,8 @@ Authenticated API requests use the `X-Session-Token` header. The frontend keeps 
 | `/api/drafts/*` | Attachment-aware draft create, read, update, delete, and send operations. |
 | `/api/profile` | Read and update the account display name and avatar. |
 | `/calls/start` | Starts a general outbound call without account-creation authority. |
-| `/webhooks/telnyx/*` | Telnyx voice and SMS event callbacks. Provider signatures are verified and event IDs deduplicated. |
-| `/internal/voice/*` | Private, token-protected call activation, call-scoped actions, time context, and cleanup for the voice agent. |
+| `/webhooks/telnyx/*` | Telnyx voice and SMS event callbacks. Provider signatures are verified and event IDs deduplicated; inbound voice calls are verified by SMS OTP before media streaming starts. |
+| `/internal/voice/*` | Private, token-protected call activation, call-scoped actions, time context, and cleanup for the voice agent. Inbound personal actions require a verified call context. |
 | `/health`, `/ready` | API liveness and dependency readiness. |
 
 ## Account creation and authentication
@@ -93,6 +93,14 @@ Authenticated API requests use the `X-Session-Token` header. The frontend keeps 
 5. After the account has been created through the call, the user can choose **New User? Set Password** on the sign in page. The flow verifies the mobile number by SMS OTP and sets the account's initial password.
 
 Ordinary outbound calls do not receive account-creation tools. The caller-name confirmation and explicit consent checks are enforced server-side as well as in the conversational flow.
+
+### Inbound voice calls
+
+1. Telnyx posts an inbound `call.initiated` event to the signed voice webhook. The API checks the called number, answers the call, and sends a six-digit OTP to the caller number with per-call and daily limits.
+2. Telnyx speaks the keypad prompt and gathers six digits followed by `#`. The OTP is stored as a call-bound hash; raw digits are handled only by the signed webhook and never enter Sarvam transcription or chat.
+3. The API validates the gather event and OTP before starting the media stream. Invalid, expired, or exhausted attempts do not create a voice-agent session or enable personal actions.
+4. After verification, existing accounts receive the ordinary voice assistant. A new number enters account setup: the assistant collects and confirms a name, then requires explicit consent before creating the account.
+5. The inbound stream ticket is one-use, bound to the verified phone and call direction, and server-side action checks reject unverified inbound call contexts.
 
 ### OTP, password, and sessions
 

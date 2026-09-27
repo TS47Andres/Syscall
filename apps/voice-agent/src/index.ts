@@ -49,6 +49,7 @@ interface CallSession {
   socket: WebSocket;
   ticket: string;
   expectedPhoneE164: string;
+  expectedDirection: 'inbound' | 'outbound';
   callControlId?: string;
   stt?: WebSocket;
   pendingAudio: string[];
@@ -69,7 +70,7 @@ interface CallSession {
   ticketReady: Promise<void>;
   apiSessionClosed: boolean;
   accountSetupName?: string;
-  accountSetupPhase?: 'confirm_name' | 'awaiting_create_prompt' | 'confirm_create' | 'completed';
+  accountSetupPhase?: 'collect_name' | 'confirm_name' | 'awaiting_create_prompt' | 'confirm_create' | 'completed';
 }
 
 // Hashes stream tickets so only the one-time verifier, never the raw token, is stored in Redis.
@@ -201,7 +202,8 @@ function formatToolDefinitions(canConfirmEmail: boolean, pendingEmail: PendingVo
     { type: 'function', function: { name: 'reschedule_scheduled_email', description: 'Change a pending email schedule when the caller clearly asks. Use an emailId from list_scheduled_emails and exactly one new time: delaySeconds for a relative time or scheduledAt as RFC3339 with +05:30.', parameters: { type: 'object', properties: { emailId: { type: 'string' }, delaySeconds: { type: 'integer', minimum: 60, maximum: 31536000 }, scheduledAt: { type: 'string', format: 'date-time' } }, required: ['emailId'], additionalProperties: false } } },
     { type: 'function', function: { name: 'offer_more_help', description: 'Call only after the current request has been fully answered or completed. The application will ask the caller whether they need any other help; this tool does not end the call.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
   ];
-  if (accountSetupPhase === 'confirm_name') tools.unshift({ type: 'function', function: { name: 'confirm_account_name', description: 'Call only after the caller explicitly confirms the name you just read back. If they correct the name, read the corrected name back and wait for confirmation. Never create the account in this step.', parameters: { type: 'object', properties: { displayName: { type: 'string', minLength: 2, maxLength: 100 } }, required: ['displayName'], additionalProperties: false } } });
+  if (accountSetupPhase === 'collect_name' || accountSetupPhase === 'confirm_name') tools.unshift({ type: 'function', function: { name: 'set_account_name', description: accountSetupPhase === 'collect_name' ? 'Save the name the caller just gave for their new Syscall account. Call only after they have provided a name; the application will read it back for confirmation.' : 'Save a corrected account name the caller just provided. Do not treat a correction as confirmation; read the corrected name back and wait for explicit confirmation.', parameters: { type: 'object', properties: { displayName: { type: 'string', minLength: 2, maxLength: 100 } }, required: ['displayName'], additionalProperties: false } } });
+  if (accountSetupPhase === 'confirm_name') tools.unshift({ type: 'function', function: { name: 'confirm_account_name', description: 'Call only after the caller explicitly confirms the name you just read back. If corrected, read the corrected name back and wait for confirmation. Never create the account in this step.', parameters: { type: 'object', properties: { displayName: { type: 'string', minLength: 2, maxLength: 100 } }, required: ['displayName'], additionalProperties: false } } });
   if (accountSetupPhase === 'confirm_create') tools.unshift({ type: 'function', function: { name: 'create_account', description: 'Create the account only after you have just asked whether to create it and the caller gives a clear affirmative confirmation in their own language. Do not call for an initial request, a name confirmation, or an ambiguous answer.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
   if (canConfirmEmail && pendingEmail?.scheduledAt) tools.splice(7, 0, { type: 'function', function: { name: 'schedule_confirmed_email', description: 'Schedule the staged email only after an unambiguous affirmative confirmation to the immediately preceding application question about its recipient, content, and exact IST time.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
   else if (canConfirmEmail && pendingEmail) tools.splice(7, 0, { type: 'function', function: { name: 'send_confirmed_email', description: 'Send the staged immediate email only after an unambiguous affirmative confirmation to the immediately preceding application question. Never infer confirmation from an earlier turn.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
@@ -394,11 +396,13 @@ async function modelResponse(session: CallSession, language: VoiceLanguage, sign
     content: `You are Syscall's friendly conversational phone assistant, not an IVR. For this response, speak in ${language.name}, the language detected for the caller's latest utterance, using its normal script.${languageScript} Language is selected independently for every caller turn and may change at any time; do not cling to a language used earlier in the call. Never claim that you can only speak or assist in English; respond to the latest utterance in ${language.name}. Keep answers concise and natural for a phone conversation. Help with Syscall account creation, password reset, writing plain-text email, and scheduling email to an active Syscall account. When the caller clearly asks to create/sign up for an account, call create_account immediately; do not ask for confirmation, offer keypad options, or start a menu. When the caller asks for password reset/recovery, call request_password_reset immediately. ${timeContext} ${emailDraftInstruction} A prepared email may only be sent or scheduled after the application has read back its destination, message summary, and (for scheduling) exact IST time, then asked for confirmation; act only on a clear affirmative answer on the next turn. Never send or schedule merely because the caller initially asked. ${schedulingInstruction} Ask a brief clarifying question only if the caller's intent or time is genuinely ambiguous. ${turnInstruction} If a confirmed immediate send fails, explain the technical failure and only say an SMS notice was queued if failureNotificationQueued is true. If a schedule is accepted, say it is scheduled for the returned IST time; do not claim it has already been sent. Never claim an operation succeeded unless a tool result confirms it. Never ask for a password, OTP, payment details, or other secrets. Explain outcomes naturally in ${language.name}. Never mention IVR, keypad options, or internal tools.`,
   };
   // Removes a legacy instruction that bypassed the explicitly confirmed signup state machine.
-  system.content = String(system.content).replace('When the caller clearly asks to create/sign up for an account, call create_account immediately; do not ask for confirmation, offer keypad options, or start a menu.', 'Account creation is limited to the explicitly confirmed browser signup flow described in the following onboarding instruction.');
+  system.content = String(system.content).replace('When the caller clearly asks to create/sign up for an account, call create_account immediately; do not ask for confirmation, offer keypad options, or start a menu.', 'Account creation is limited to the explicitly confirmed onboarding flow described in the following instruction.');
   const accountSetupMessage: ChatMessage = {
     role: 'system',
-    content: session.accountSetupPhase === 'confirm_name'
-      ? `These onboarding rules override generic account-creation instructions. This is a browser-requested account setup call. The requested name is ${JSON.stringify(session.accountSetupName ?? '')}. Ask the caller to confirm that name; if corrected, read the corrected name back and wait. Call confirm_account_name only after they confirm the exact name. Do not create an account yet.`
+    content: session.accountSetupPhase === 'collect_name'
+      ? 'These onboarding rules override generic account-creation instructions. The caller has verified control of this phone number, and it is not linked to an active account. Ask what name they want for their Syscall account. After they give a name, call set_account_name. Do not create an account yet.'
+      : session.accountSetupPhase === 'confirm_name'
+      ? `These onboarding rules override generic account-creation instructions. The caller verified control of this phone number. The proposed account name is ${JSON.stringify(session.accountSetupName ?? '')}. Read it back and ask if it is correct; if corrected, read the corrected name back and wait. Call confirm_account_name only after they confirm the exact name. Do not create an account yet.`
       : session.accountSetupPhase === 'awaiting_create_prompt'
         ? 'These onboarding rules override generic account-creation instructions. The caller confirmed their name. Ask them clearly whether you should create their Syscall account now. Do not create it in this response; wait for their next turn.'
         : session.accountSetupPhase === 'confirm_create'
@@ -441,6 +445,15 @@ async function modelResponse(session: CallSession, language: VoiceLanguage, sign
 
 // Executes allowlisted account, mail, and call-control actions using this live call's identity.
 async function executeTool(session: CallSession, name: string, argumentsValue: Record<string, unknown>, canConfirmEmail: boolean): Promise<Record<string, unknown>> {
+  if (name === 'set_account_name' && session.callControlId && ['collect_name', 'confirm_name'].includes(session.accountSetupPhase ?? '') && typeof argumentsValue.displayName === 'string') {
+    const displayName = argumentsValue.displayName.trim();
+    const result = await callApi('/internal/voice/actions', { callControlId: session.callControlId, actionId: crypto.randomUUID(), action: 'set_account_name', displayName });
+    if (result.status === 'name_captured') {
+      session.accountSetupName = String(result.displayName ?? displayName);
+      session.accountSetupPhase = 'confirm_name';
+    }
+    return result;
+  }
   if (name === 'confirm_account_name' && session.callControlId && session.accountSetupPhase === 'confirm_name' && typeof argumentsValue.displayName === 'string') {
     const result = await callApi('/internal/voice/actions', { callControlId: session.callControlId, actionId: crypto.randomUUID(), action: 'confirm_account_name', displayName: argumentsValue.displayName });
     if (result.status === 'confirmed') session.accountSetupPhase = 'awaiting_create_prompt';
@@ -722,7 +735,7 @@ function parseJson(raw: RawData): TelnyxEnvelope | TranscriptEvent | null {
 // Verifies call/ticket/codec alignment, binds the call to the API, and opens realtime STT.
 async function activateSession(session: CallSession, event: TelnyxEnvelope): Promise<void> {
   const callControlId = event.start?.call_control_id;
-  const rawPhone = event.start?.to;
+  const rawPhone = session.expectedDirection === 'inbound' ? event.start?.from : event.start?.to;
   const phone = typeof rawPhone === 'string' ? toPhoneE164(rawPhone) : '';
   if (!callControlId || !phone || phone !== session.expectedPhoneE164) throw new Error('Telnyx stream did not match its one-time call ticket.');
   const media = event.start?.media_format;
@@ -730,9 +743,10 @@ async function activateSession(session: CallSession, event: TelnyxEnvelope): Pro
   const activation = await callApi('/internal/voice/sessions/activate', { ticket: session.ticket, callControlId, phone });
   session.ticket = '';
   session.callControlId = callControlId;
+  if (activation.setupPhase === 'collect_name') session.accountSetupPhase = 'collect_name';
   if (activation.purpose === 'account_setup') {
     session.accountSetupName = String(activation.displayName ?? '');
-    session.accountSetupPhase = 'confirm_name';
+    session.accountSetupPhase = activation.setupPhase === 'collect_name' ? 'collect_name' : 'confirm_name';
   }
   session.activated = true;
   logger.info('Telnyx media stream activated for voice session');
@@ -741,10 +755,12 @@ async function activateSession(session: CallSession, event: TelnyxEnvelope): Pro
   session.stt.on('open', () => {
     logger.info('Sarvam realtime speech recognition connected');
     for (const audio of session.pendingAudio.splice(0)) session.stt?.send(JSON.stringify({ event: 'audio_input', audio }));
-    const greeting = session.accountSetupPhase === 'confirm_name'
-      ? `You requested a Syscall account setup call. I have your name as ${session.accountSetupName}. Is that correct? You can tell me the correct name if it needs changing.`
-      : INITIAL_GREETING;
-    void speak(session, greeting, voiceLanguageFor(session.accountSetupPhase === 'confirm_name' ? 'en-IN' : 'hi-IN')!);
+    const greeting = session.accountSetupPhase === 'collect_name'
+      ? 'Your phone number is verified. It is not linked to an active Syscall account. What name would you like to use for your account?'
+      : session.accountSetupPhase === 'confirm_name'
+        ? `Let us confirm your account name. I have it as ${session.accountSetupName}. Is that correct? You can tell me the corrected name.`
+        : INITIAL_GREETING;
+    void speak(session, greeting, voiceLanguageFor(session.accountSetupPhase === 'collect_name' || session.accountSetupPhase === 'confirm_name' ? 'en-IN' : 'hi-IN')!);
   });
   // Handles speech-start barge-in and finalized caller turns from Sarvam.
   session.stt.on('message', (raw) => {
@@ -781,6 +797,7 @@ websocketServer.on('connection', (socket, request) => {
     socket,
     ticket,
     expectedPhoneE164: '',
+    expectedDirection: 'outbound',
     pendingAudio: [],
     history: [],
     awaitingEndConfirmation: false,
@@ -798,8 +815,9 @@ websocketServer.on('connection', (socket, request) => {
   // Resolves the ticket's expected number before the provider's start event is accepted.
   session.ticketReady = redis.get(`voice:stream-ticket:${ticketHash(ticket)}`).then((value) => {
     if (!value) throw new Error('Voice ticket expired before stream activation.');
-    const parsed = JSON.parse(value) as { phoneE164: string; purpose?: string; displayName?: string };
+    const parsed = JSON.parse(value) as { phoneE164: string; direction?: 'inbound' | 'outbound'; purpose?: string; displayName?: string };
     session.expectedPhoneE164 = phoneSchema.parse(parsed.phoneE164);
+    session.expectedDirection = parsed.direction === 'inbound' ? 'inbound' : 'outbound';
   });
   // Rejects the stream if its Redis ticket disappeared or contains invalid call metadata.
   void session.ticketReady.catch((error) => {

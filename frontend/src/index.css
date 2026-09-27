@@ -374,6 +374,11 @@ input, textarea, select {
   .gmail-search-input {
     font-size: 15px !important;
     font-weight: 500 !important;
+    text-align: center !important;
+  }
+
+  .gmail-search-input::placeholder {
+    text-align: center !important;
   }
 
   .gmail-header-right {

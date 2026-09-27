@@ -120,10 +120,10 @@ export const Header: React.FC<HeaderProps> = ({
           style={styles.mobileHamburger}
           className="mobile-only"
           onClick={onToggleDrawer}
-          title="Open menu"
-          aria-label="Open menu"
+          title="Syscall"
+          aria-label="Syscall"
         >
-          <IconMenu size={20} color="#444746" />
+          <SyscallLogo size={24} />
         </button>
 
         <span style={styles.searchGlassIcon} className="desktop-only">
@@ -135,7 +135,10 @@ export const Header: React.FC<HeaderProps> = ({
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder={isMobile ? 'Syscall' : t('search_placeholder', currentUser.language)}
-          style={styles.searchInput}
+          style={{
+            ...styles.searchInput,
+            ...(isMobile ? { textAlign: 'center' } : {}),
+          }}
           className="gmail-search-input"
         />
 

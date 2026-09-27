@@ -3,7 +3,6 @@ import { SyscallLogo } from '../Logo';
 import { IconClose } from '../Icons';
 import { Sidebar, type FolderId } from './Sidebar';
 import type { User, Email } from '../../types';
-import { getInitials } from '../../types';
 
 interface MobileDrawerProps {
   isOpen: boolean;
@@ -14,8 +13,8 @@ interface MobileDrawerProps {
   starredIds: Set<string>;
   trashIds: Set<string>;
   currentUser: User;
-  onOpenProfile: () => void;
-  onSignOut: () => void;
+  onOpenProfile?: () => void;
+  onSignOut?: () => void;
 }
 
 export const MobileDrawer: React.FC<MobileDrawerProps> = ({
@@ -27,8 +26,6 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
   starredIds,
   trashIds,
   currentUser,
-  onOpenProfile,
-  onSignOut,
 }) => {
   if (!isOpen) return null;
 
@@ -68,47 +65,6 @@ export const MobileDrawer: React.FC<MobileDrawerProps> = ({
             userPhone={currentUser.phone}
             isCollapsed={false}
           />
-        </div>
-
-        {/* User Card */}
-        <div
-          style={styles.bottomCard}
-          onClick={() => {
-            onOpenProfile();
-            onClose();
-          }}
-          title="View Syscall Account & Profile"
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={styles.userAvatar}>
-              {currentUser.avatarUrl ? (
-                <img
-                  src={currentUser.avatarUrl}
-                  alt="Avatar"
-                  style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                />
-              ) : (
-                getInitials(currentUser.name)
-              )}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-              <span style={styles.userName}>
-                {currentUser.name || currentUser.emailAddress}
-              </span>
-              <span style={{ fontSize: 11.5, color: '#747775' }}>
-                +91 {currentUser.phone} • Profile →
-              </span>
-            </div>
-          </div>
-          <button
-            style={styles.signOutBtn}
-            onClick={(e) => {
-              e.stopPropagation();
-              onSignOut();
-            }}
-          >
-            Sign out
-          </button>
         </div>
       </aside>
     </>
@@ -154,48 +110,6 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     justifyContent: 'center',
     cursor: 'pointer',
-    background: 'none',
-    border: 'none',
-  },
-  bottomCard: {
-    padding: '12px',
-    borderRadius: '12px',
-    backgroundColor: '#EDF2FA',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '8px',
-    marginTop: 'auto',
-    cursor: 'pointer',
-  },
-  userAvatar: {
-    width: '32px',
-    height: '32px',
-    borderRadius: '50%',
-    backgroundColor: '#0B57D0',
-    color: '#FFFFFF',
-    fontSize: '12px',
-    fontWeight: 700,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    overflow: 'hidden',
-  },
-  userName: {
-    fontSize: '13px',
-    fontWeight: 700,
-    color: '#1F1F1F',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  signOutBtn: {
-    fontSize: '12px',
-    color: '#DC2626',
-    fontWeight: 600,
-    textAlign: 'left',
-    cursor: 'pointer',
-    padding: '2px 0',
     background: 'none',
     border: 'none',
   },

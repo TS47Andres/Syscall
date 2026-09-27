@@ -320,31 +320,12 @@ input, textarea, select {
   min-width: 0;
 }
 
-.floating-actions-container {
+.sarvam-ai-fab {
   position: fixed;
   bottom: 24px;
-  right: 24px;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 12px;
-  z-index: 990;
-  pointer-events: none;
-}
-
-.floating-actions-container > * {
-  pointer-events: auto;
-}
-
-.floating-actions-container .gmail-fab {
-  position: static !important;
-  bottom: auto !important;
-  right: auto !important;
-}
-
-.sarvam-ai-fab {
-  width: 46px;
-  height: 46px;
+  left: 24px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -355,6 +336,7 @@ input, textarea, select {
   cursor: pointer;
   padding: 0;
   outline: none;
+  z-index: 990;
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.22s ease !important;
 }
 
@@ -617,22 +599,16 @@ input, textarea, select {
     margin-top: auto !important;
   }
 
-  .floating-actions-container {
-    bottom: 18px !important;
-    right: 18px !important;
-    gap: 10px !important;
-    flex-direction: row !important;
-    align-items: center !important;
-  }
-
   .sarvam-ai-fab {
-    width: 40px !important;
-    height: 40px !important;
+    bottom: 18px !important;
+    left: 18px !important;
+    width: 44px !important;
+    height: 44px !important;
   }
 
   .gmail-fab {
-    bottom: 18px;
-    right: 18px;
+    bottom: 18px !important;
+    right: 18px !important;
     height: 48px;
     padding: 0 16px;
     border-radius: 14px;

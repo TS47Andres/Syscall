@@ -15,17 +15,18 @@ export const FloatingComposeButton: React.FC<FloatingComposeButtonProps> = ({
   const composeText = t('compose', lang);
 
   return (
-    <div className="floating-actions-container">
-      {/* Sarvam AI Logo / Launcher (same as laptop device) */}
+    <>
+      {/* Sarvam AI Logo / Launcher at Bottom Left Corner */}
       <button
         type="button"
         className="sarvam-ai-fab"
         title="Sarvam AI Agent (Coming soon)"
         aria-label="Sarvam AI Agent"
       >
-        <IconSarvamAI size={28} />
+        <IconSarvamAI size={26} />
       </button>
 
+      {/* Compose Action Button at Bottom Right Corner */}
       <button
         className="gmail-fab"
         onClick={onOpenCompose}
@@ -35,6 +36,6 @@ export const FloatingComposeButton: React.FC<FloatingComposeButtonProps> = ({
         <IconCompose size={20} color="#001D35" />
         <span>{composeText}</span>
       </button>
-    </div>
+    </>
   );
 };

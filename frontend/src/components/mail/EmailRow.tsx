@@ -1,10 +1,15 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import type { Email } from '../../types';
 import {
   IconStar,
   IconAttach,
   IconShieldCheck,
   IconShieldAlert,
+  IconCheck,
+  IconMailRead,
+  IconMailUnread,
+  IconTrash,
+  IconSpam,
 } from '../Icons';
 
 interface EmailRowProps {
@@ -12,8 +17,15 @@ interface EmailRowProps {
   folder: string;
   isSelected: boolean;
   isStarred: boolean;
+  isChecked: boolean;
+  isMobile?: boolean;
+  hasSelectionActive?: boolean;
   onSelect: (email: Email) => void;
   onToggleStar: (id: string, e: React.MouseEvent) => void;
+  onToggleCheck: (id: string, e: React.MouseEvent) => void;
+  onToggleRead?: (id: string, e: React.MouseEvent) => void;
+  onDelete?: (id: string, e: React.MouseEvent) => void;
+  onToggleSpam?: (id: string, e: React.MouseEvent) => void;
 }
 
 export const EmailRow: React.FC<EmailRowProps> = ({
@@ -21,11 +33,73 @@ export const EmailRow: React.FC<EmailRowProps> = ({
   folder,
   isSelected,
   isStarred,
+  isChecked,
+  isMobile,
+  hasSelectionActive,
   onSelect,
   onToggleStar,
+  onToggleCheck,
+  onToggleRead,
+  onDelete,
+  onToggleSpam,
 }) => {
   const isUnread = !email.readAt;
   const displayedAddress = folder === 'sent' ? email.recipientAddress : email.senderAddress;
+
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const longPressTriggered = useRef(false);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+    longPressTriggered.current = false;
+
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      try {
+        if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+          navigator.vibrate(40);
+        }
+      } catch {}
+      onToggleCheck(email.publicId, e as unknown as React.MouseEvent);
+    }, 450);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStartPos.current || !longPressTimer.current) return;
+    const touch = e.touches[0];
+    if (!touch) return;
+    const dx = Math.abs(touch.clientX - touchStartPos.current.x);
+    const dy = Math.abs(touch.clientY - touchStartPos.current.y);
+    if (dx > 10 || dy > 10) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    touchStartPos.current = null;
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+
+    if (isMobile && hasSelectionActive) {
+      onToggleCheck(email.publicId, e);
+      return;
+    }
+
+    onSelect(email);
+  };
 
   const formatPhone = (addr: string) => {
     const raw = addr.replace(/\D/g, '').slice(-10);
@@ -44,16 +118,44 @@ export const EmailRow: React.FC<EmailRowProps> = ({
 
   return (
     <div
-      onClick={() => onSelect(email)}
-      className={`gmail-email-row ${isSelected ? 'selected' : ''} ${isUnread ? 'unread' : 'read'}`}
+      onClick={handleClick}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+      className={`gmail-email-row ${isSelected ? 'selected' : ''} ${isChecked ? 'checked' : ''} ${isUnread ? 'unread' : 'read'}`}
       style={{
         ...styles.row,
-        backgroundColor: isSelected ? '#D3E3FD' : isUnread ? '#FFFFFF' : '#F6F8FC',
+        backgroundColor: isChecked ? '#C2E7FF' : isSelected ? '#D3E3FD' : isUnread ? '#FFFFFF' : '#F6F8FC',
         fontWeight: isUnread ? 700 : 400,
       }}
     >
+      {/* Checkbox button (DESKTOP ONLY - hidden on mobile responsive) */}
+      {!isMobile && (
+        <button
+          type="button"
+          className="gmail-row-checkbox-btn hide-on-mobile"
+          onClick={(e) => onToggleCheck(email.publicId, e)}
+          title={isChecked ? 'Deselect message' : 'Select message'}
+          aria-label={isChecked ? 'Deselect message' : 'Select message'}
+          style={styles.checkboxBtn}
+        >
+          <div
+            className={`gmail-custom-checkbox ${isChecked ? 'is-active' : ''}`}
+            style={{
+              ...styles.checkboxBox,
+              backgroundColor: isChecked ? '#0B57D0' : 'transparent',
+              borderColor: isChecked ? '#0B57D0' : '#747775',
+            }}
+          >
+            {isChecked && <IconCheck size={12} color="#FFFFFF" />}
+          </div>
+        </button>
+      )}
+
       {/* Star button */}
       <button
+        type="button"
         style={styles.starBtn}
         onClick={(e) => onToggleStar(email.publicId, e)}
         title={isStarred ? 'Starred' : 'Not starred'}
@@ -90,8 +192,49 @@ export const EmailRow: React.FC<EmailRowProps> = ({
         <span style={styles.snippetText}>{email.textBody}</span>
       </div>
 
+      {/* Hover Quick Action Buttons */}
+      <div className="gmail-row-hover-actions" style={styles.hoverActions}>
+        {onToggleRead && (
+          <button
+            type="button"
+            className="gmail-row-action-btn"
+            onClick={(e) => onToggleRead(email.publicId, e)}
+            title={isUnread ? 'Mark as read' : 'Mark as unread'}
+            style={styles.actionBtn}
+          >
+            {isUnread ? (
+              <IconMailRead size={17} color="#444746" />
+            ) : (
+              <IconMailUnread size={17} color="#444746" />
+            )}
+          </button>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            className="gmail-row-action-btn"
+            onClick={(e) => onDelete(email.publicId, e)}
+            title="Delete"
+            style={styles.actionBtn}
+          >
+            <IconTrash size={17} color="#444746" />
+          </button>
+        )}
+        {onToggleSpam && folder !== 'spam' && folder !== 'bin' && (
+          <button
+            type="button"
+            className="gmail-row-action-btn"
+            onClick={(e) => onToggleSpam(email.publicId, e)}
+            title="Report spam"
+            style={styles.actionBtn}
+          >
+            <IconSpam size={17} color="#444746" />
+          </button>
+        )}
+      </div>
+
       {/* Right Column: Attachment Badge & Date */}
-      <div style={styles.rightCol}>
+      <div className="gmail-row-date-group" style={styles.rightCol}>
         {hasAttachments && (
           <span
             style={{
@@ -133,6 +276,29 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     userSelect: 'none',
     transition: 'background-color 0.15s ease',
+    position: 'relative',
+    WebkitTouchCallout: 'none',
+  },
+  checkboxBtn: {
+    background: 'none',
+    border: 'none',
+    padding: '4px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    outline: 'none',
+  },
+  checkboxBox: {
+    width: '16px',
+    height: '16px',
+    borderRadius: '3px',
+    border: '1.8px solid #747775',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.15s ease',
   },
   starBtn: {
     background: 'none',
@@ -176,6 +342,25 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  hoverActions: {
+    display: 'none',
+    alignItems: 'center',
+    gap: '4px',
+    flexShrink: 0,
+  },
+  actionBtn: {
+    background: 'none',
+    border: 'none',
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    color: '#444746',
+    transition: 'background-color 0.15s ease',
   },
   rightCol: {
     display: 'flex',

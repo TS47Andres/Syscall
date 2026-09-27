@@ -180,6 +180,16 @@ class SyscallApi {
     await this.request(`/api/mail/${encodeURIComponent(publicId)}/star`, { method: starred ? 'PUT' : 'DELETE' });
   }
 
+  // Marks a message as read or unread.
+  async setRead(publicId: string, read: boolean): Promise<void> {
+    await this.request(`/api/mail/${encodeURIComponent(publicId)}/read`, { method: 'PATCH', body: JSON.stringify({ read }) });
+  }
+
+  // Executes a batch action across multiple messages.
+  async batchMailAction(publicIds: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam'): Promise<void> {
+    await this.request('/api/mail/batch-action', { method: 'POST', body: JSON.stringify({ publicIds, action }) });
+  }
+
   // Marks or clears the recipient's spam classification for one message.
   async setSpam(publicId: string, spam: boolean): Promise<void> {
     await this.request(`/api/mail/${encodeURIComponent(publicId)}/spam`, { method: spam ? 'POST' : 'DELETE' });

@@ -812,6 +812,67 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     return { filename: attachment.originalFilename, contentType: attachment.contentType, contentBase64: (await fs.readFile(fullPath)).toString('base64') };
   });
 
+  // Executes atomic batch actions across selected messages for the authenticated user.
+  app.post('/api/mail/batch-action', async (request) => {
+    const user = await requireUser(request);
+    const body = z.object({
+      publicIds: z.array(z.string()).min(1),
+      action: z.enum(['read', 'unread', 'trash', 'star', 'unstar', 'spam', 'unspam']),
+    }).parse(request.body);
+
+    const emails = await Email.find({
+      publicId: { $in: body.publicIds },
+      $or: [{ senderUserId: user._id }, { recipientUserId: user._id }],
+    });
+
+    const now = new Date();
+    for (const email of emails) {
+      const isSender = email.senderUserId.equals(user._id);
+      switch (body.action) {
+        case 'read':
+          email.readAt = email.readAt || now;
+          break;
+        case 'unread':
+          email.readAt = null;
+          break;
+        case 'trash':
+          if (isSender) email.senderDeletedAt = now;
+          else email.recipientDeletedAt = now;
+          break;
+        case 'star':
+          if (isSender) email.senderStarredAt = now;
+          else email.recipientStarredAt = now;
+          break;
+        case 'unstar':
+          if (isSender) email.senderStarredAt = null;
+          else email.recipientStarredAt = null;
+          break;
+        case 'spam':
+          if (!isSender) email.isSpam = true;
+          break;
+        case 'unspam':
+          if (!isSender) email.isSpam = false;
+          break;
+      }
+      await email.save();
+    }
+    return { status: 'ok', count: emails.length };
+  });
+
+  // Updates read/unread state for a message.
+  app.patch('/api/mail/:publicId/read', async (request) => {
+    const user = await requireUser(request);
+    const params = z.object({ publicId: z.string() }).parse(request.params);
+    const body = z.object({ read: z.boolean() }).parse(request.body);
+    const email = await Email.findOne({ publicId: params.publicId });
+    if (!email || (!email.senderUserId.equals(user._id) && !email.recipientUserId.equals(user._id))) {
+      throw httpError(404, 'Message not found.');
+    }
+    email.readAt = body.read ? (email.readAt || new Date()) : null;
+    await email.save();
+    return { readAt: email.readAt };
+  });
+
   // Persists a participant-scoped star without changing the other mailbox view.
   app.put('/api/mail/:publicId/star', async (request) => { const user = await requireUser(request); const params = z.object({ publicId: z.string() }).parse(request.params); const email = await Email.findOne({ publicId: params.publicId }); if (!email) throw httpError(404, 'Message not found.'); if (email.senderUserId.equals(user._id)) email.senderStarredAt = new Date(); else if (email.recipientUserId.equals(user._id)) email.recipientStarredAt = new Date(); else throw httpError(404, 'Message not found.'); await email.save(); return { isStarred: true }; });
 

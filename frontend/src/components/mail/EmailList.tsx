@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import type { Email } from '../../types';
-import { CategoryTabs, type TabCategory } from './CategoryTabs';
+import type { TabCategory } from './CategoryTabs';
 import { EmailRow } from './EmailRow';
 import {
   IconTrash,
@@ -18,6 +18,12 @@ import {
   IconUpdates,
   IconInbox,
   IconSync,
+  IconCheck,
+  IconMinus,
+  IconMailRead,
+  IconMailUnread,
+  IconMoreVertical,
+  IconClose,
 } from '../Icons';
 import { useMail } from '../../context/MailContext';
 import { t } from '../../utils/i18n';
@@ -29,8 +35,20 @@ interface EmailListProps {
   onSelectCategoryTab: (tab: TabCategory) => void;
   selectedEmailId: string | null;
   starredIds: Set<string>;
+  checkedEmailIds: Set<string>;
   onSelectEmail: (email: Email) => void;
   onToggleStar: (id: string, e: React.MouseEvent) => void;
+  onToggleCheck: (id: string, e: React.MouseEvent) => void;
+  onToggleSelectAll: () => void;
+  onBatchRead: (read: boolean, overrideIds?: string[]) => void;
+  onBatchStar: (star: boolean, overrideIds?: string[]) => void;
+  onBatchTrash: () => void;
+  onBatchSpam: (spam: boolean) => void;
+  onBatchLabel?: (action: 'important' | 'inbox' | 'spam' | 'trash') => void;
+  onClearSelection: () => void;
+  onSingleToggleRead?: (id: string, e: React.MouseEvent) => void;
+  onSingleDelete?: (id: string, e: React.MouseEvent) => void;
+  onSingleSpam?: (id: string, e: React.MouseEvent) => void;
   onEmptyBin?: () => void;
   onRefresh?: () => void;
   refreshing?: boolean;
@@ -45,8 +63,20 @@ export const EmailList: React.FC<EmailListProps> = ({
   onSelectCategoryTab,
   selectedEmailId,
   starredIds,
+  checkedEmailIds,
   onSelectEmail,
   onToggleStar,
+  onToggleCheck,
+  onToggleSelectAll,
+  onBatchRead,
+  onBatchStar,
+  onBatchTrash,
+  onBatchSpam,
+  onBatchLabel,
+  onClearSelection,
+  onSingleToggleRead,
+  onSingleDelete,
+  onSingleSpam,
   onEmptyBin,
   onRefresh,
   refreshing,
@@ -55,6 +85,48 @@ export const EmailList: React.FC<EmailListProps> = ({
 }) => {
   const { currentUser } = useMail();
   const lang = currentUser?.language || 'en';
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [menuCoords, setMenuCoords] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Position the fixed menu reliably right below the three-dot button
+  const handleToggleMenu = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!isMenuOpen && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const menuWidth = 210;
+      const left = Math.max(12, Math.min(rect.left, window.innerWidth - menuWidth - 12));
+      setMenuCoords({
+        top: rect.bottom + 6,
+        left,
+      });
+    }
+    setIsMenuOpen((v) => !v);
+  };
+
+  useEffect(() => {
+    if (!isMenuOpen) return;
+    const onDocClick = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      if (menuRef.current && menuRef.current.contains(target)) return;
+      if (buttonRef.current && buttonRef.current.contains(target)) return;
+      setIsMenuOpen(false);
+    };
+    const timer = setTimeout(() => {
+      document.addEventListener('click', onDocClick);
+      document.addEventListener('touchstart', onDocClick);
+    }, 10);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', onDocClick);
+      document.removeEventListener('touchstart', onDocClick);
+    };
+  }, [isMenuOpen]);
+
+  const checkedCount = checkedEmailIds.size;
+  const allSelected = emails.length > 0 && emails.every((e) => checkedEmailIds.has(e.publicId));
 
   const getFolderTitle = () => {
     switch (folder) {
@@ -132,43 +204,274 @@ export const EmailList: React.FC<EmailListProps> = ({
         display: hasSelectedEmail && isMobile ? 'none' : 'flex',
       }}
     >
-      {/* Category Tabs in Inbox or Folder Title */}
-      {folder === 'inbox' ? (
-        <CategoryTabs
-          activeTab={categoryTab}
-          onSelectTab={onSelectCategoryTab}
-        />
-      ) : (
-        <div style={styles.folderHeader}>
-          <strong style={{ fontSize: 16, color: '#1F1F1F' }}>
-            {getFolderTitle()}
-          </strong>
-
-          {(folder === 'bin' || folder === 'trash') && emails.length > 0 && onEmptyBin && (
-            <button style={styles.emptyBinBtn} onClick={onEmptyBin}>
-              Empty Bin now
-            </button>
-          )}
-
-          {onRefresh && (
-            <button
-              style={styles.refreshBtn}
-              onClick={onRefresh}
-              title={t('refresh_mail', lang)}
+      {/* Single Unified Header Row: Checkbox, 3-dots, and Category Chips / Folder title */}
+      <div className="gmail-cat-tabs-row no-scrollbar" style={styles.unifiedHeaderRow}>
+        {/* Master Select All Checkbox (DESKTOP ONLY - hidden on mobile responsive) */}
+        {!isMobile && (
+          <button
+            type="button"
+            className="gmail-toolbar-icon-btn hide-on-mobile"
+            onClick={onToggleSelectAll}
+            title={allSelected ? t('deselect_all', lang) : t('select_all', lang)}
+            aria-label={allSelected ? t('deselect_all', lang) : t('select_all', lang)}
+            style={styles.checkboxBtn}
+          >
+            <div
+              style={{
+                ...styles.checkboxBox,
+                backgroundColor: checkedCount > 0 ? '#0B57D0' : 'transparent',
+                borderColor: checkedCount > 0 ? '#0B57D0' : '#747775',
+              }}
             >
-              <span
-                style={{
-                  display: 'inline-flex',
-                  transform: refreshing ? 'rotate(360deg)' : 'none',
-                  transition: 'transform 0.5s ease',
-                }}
-              >
-                <IconSync size={16} color="#444746" />
-              </span>
+              {checkedCount > 0 && (
+                allSelected ? (
+                  <IconCheck size={12} color="#FFFFFF" />
+                ) : (
+                  <IconMinus size={12} color="#FFFFFF" />
+                )
+              )}
+            </div>
+          </button>
+        )}
+
+        {/* Selection Count Badge when emails are selected */}
+        {checkedCount > 0 && (
+          <span style={styles.selectionCountBadge}>
+            {checkedCount} {t('selected_count', lang)}
+          </span>
+        )}
+
+        {/* Three-Dot Menu Button with all options */}
+        <button
+          ref={buttonRef}
+          type="button"
+          className="gmail-toolbar-icon-btn"
+          onClick={handleToggleMenu}
+          title="Options"
+          aria-label="Options"
+          style={styles.threeDotBtn}
+        >
+          <IconMoreVertical size={18} color="#444746" />
+        </button>
+
+        {/* Fixed position Three-Dot Options Dropdown - completely immune to parent overflow clipping */}
+        {isMenuOpen && (
+          <div
+            ref={menuRef}
+            className="gmail-dropdown-menu"
+            style={{
+              ...styles.dropdownMenu,
+              top: `${menuCoords.top}px`,
+              left: `${menuCoords.left}px`,
+            }}
+          >
+            {checkedCount > 0 ? (
+              <>
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    onBatchRead(true);
+                  }}
+                >
+                  <IconMailRead size={16} color="#444746" />
+                  <span>{t('mark_as_read', lang)}</span>
+                </button>
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    onBatchRead(false);
+                  }}
+                >
+                  <IconMailUnread size={16} color="#444746" />
+                  <span>{t('mark_as_unread', lang)}</span>
+                </button>
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    onBatchStar(true);
+                  }}
+                >
+                  <IconStar size={16} color="#E37400" />
+                  <span>{t('star_selected', lang)}</span>
+                </button>
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    onBatchLabel?.('important');
+                  }}
+                >
+                  <IconImportant size={16} color="#0B57D0" />
+                  <span>{t('mark_important', lang)}</span>
+                </button>
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    onBatchTrash();
+                  }}
+                >
+                  <IconTrash size={16} color="#BA1A1A" />
+                  <span>{t('delete_selected', lang)}</span>
+                </button>
+                {folder !== 'spam' && folder !== 'bin' && (
+                  <button
+                    type="button"
+                    style={styles.dropdownItem}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsMenuOpen(false);
+                      onBatchSpam(true);
+                    }}
+                  >
+                    <IconSpam size={16} color="#BA1A1A" />
+                    <span>{t('report_spam', lang)}</span>
+                  </button>
+                )}
+                <div style={styles.dropdownDivider} />
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    onClearSelection();
+                  }}
+                >
+                  <IconClose size={16} color="#747775" />
+                  <span>{t('deselect_all', lang)}</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    onToggleSelectAll();
+                  }}
+                >
+                  <IconCheck size={16} color="#444746" />
+                  <span>{t('select_all', lang)}</span>
+                </button>
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    const allIds = emails.map((m) => m.publicId);
+                    if (allIds.length > 0) onBatchRead(true, allIds);
+                  }}
+                >
+                  <IconMailRead size={16} color="#444746" />
+                  <span>{t('mark_as_read', lang)} (all)</span>
+                </button>
+                <button
+                  type="button"
+                  style={styles.dropdownItem}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsMenuOpen(false);
+                    const allIds = emails.map((m) => m.publicId);
+                    if (allIds.length > 0) onBatchRead(false, allIds);
+                  }}
+                >
+                  <IconMailUnread size={16} color="#444746" />
+                  <span>{t('mark_as_unread', lang)} (all)</span>
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Vertical Divider */}
+        <div style={styles.toolbarDivider} />
+
+        {/* In Inbox: Category Tabs right on the same line */}
+        {folder === 'inbox' ? (
+          <div style={styles.categoryChipsGroup}>
+            <button
+              type="button"
+              className={`gmail-cat-chip ${categoryTab === 'all' ? 'active' : ''}`}
+              onClick={() => onSelectCategoryTab('all')}
+            >
+              <IconInbox size={15} />
+              <span>{t('primary', lang)}</span>
             </button>
-          )}
-        </div>
-      )}
+            <button
+              type="button"
+              className={`gmail-cat-chip ${categoryTab === 'promotions' ? 'active' : ''}`}
+              onClick={() => onSelectCategoryTab('promotions')}
+            >
+              <IconPromotions size={15} />
+              <span>{t('promotions', lang)}</span>
+            </button>
+            <button
+              type="button"
+              className={`gmail-cat-chip ${categoryTab === 'social' ? 'active' : ''}`}
+              onClick={() => onSelectCategoryTab('social')}
+            >
+              <IconSocial size={15} />
+              <span>{t('social', lang)}</span>
+            </button>
+            <button
+              type="button"
+              className={`gmail-cat-chip ${categoryTab === 'updates' ? 'active' : ''}`}
+              onClick={() => onSelectCategoryTab('updates')}
+            >
+              <IconUpdates size={15} />
+              <span>{t('updates', lang)}</span>
+            </button>
+          </div>
+        ) : (
+          /* Non-inbox folders: Title and empty bin button */
+          <div style={styles.folderTitleGroup}>
+            <strong style={styles.folderHeading}>{getFolderTitle()}</strong>
+            {(folder === 'bin' || folder === 'trash') && emails.length > 0 && onEmptyBin && (
+              <button type="button" style={styles.emptyBinBtn} onClick={onEmptyBin}>
+                Empty Bin now
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Refresh Button at the right end */}
+        {onRefresh && (
+          <button
+            type="button"
+            style={styles.refreshBtn}
+            onClick={onRefresh}
+            title={t('refresh_mail', lang)}
+            aria-label={t('refresh_mail', lang)}
+          >
+            <span
+              style={{
+                display: 'inline-flex',
+                transform: refreshing ? 'rotate(360deg)' : 'none',
+                transition: 'transform 0.5s ease',
+              }}
+            >
+              <IconSync size={16} color="#444746" />
+            </span>
+          </button>
+        )}
+      </div>
 
       {/* Email Rows List */}
       <div style={styles.rowsScroll} className="gmail-email-scroll no-scrollbar">
@@ -190,8 +493,15 @@ export const EmailList: React.FC<EmailListProps> = ({
               folder={folder}
               isSelected={email.publicId === selectedEmailId}
               isStarred={starredIds.has(email.publicId)}
+              isChecked={checkedEmailIds.has(email.publicId)}
+              isMobile={isMobile}
+              hasSelectionActive={checkedCount > 0}
               onSelect={onSelectEmail}
               onToggleStar={onToggleStar}
+              onToggleCheck={onToggleCheck}
+              onToggleRead={onSingleToggleRead}
+              onDelete={onSingleDelete}
+              onToggleSpam={onSingleSpam}
             />
           ))
         )}
@@ -212,15 +522,117 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: '0 1px 3px rgba(60,64,67,0.06)',
     minWidth: 0,
   },
-  folderHeader: {
-    height: '48px',
-    padding: '0 16px',
+  unifiedHeaderRow: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: '8px',
+    padding: '8px 16px',
+    backgroundColor: '#FFFFFF',
     borderBottom: '1px solid #F1F3F4',
-    gap: '12px',
     flexShrink: 0,
+    userSelect: 'none',
+    minHeight: '48px',
+  },
+  checkboxBtn: {
+    background: 'none',
+    border: 'none',
+    padding: '6px',
+    borderRadius: '4px',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    outline: 'none',
+  },
+  checkboxBox: {
+    width: '16px',
+    height: '16px',
+    borderRadius: '3px',
+    border: '1.8px solid #747775',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    transition: 'all 0.15s ease',
+  },
+  selectionCountBadge: {
+    fontSize: '12px',
+    fontWeight: 600,
+    color: '#0B57D0',
+    backgroundColor: '#D3E3FD',
+    padding: '3px 8px',
+    borderRadius: '12px',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
+  threeDotBtn: {
+    width: '32px',
+    height: '32px',
+    borderRadius: '50%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    background: 'none',
+    border: 'none',
+    flexShrink: 0,
+    transition: 'background-color 0.15s ease',
+  },
+  toolbarDivider: {
+    width: '1px',
+    height: '20px',
+    backgroundColor: '#E0E2EC',
+    margin: '0 2px',
+    flexShrink: 0,
+  },
+  categoryChipsGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flex: 1,
+    overflowX: 'auto',
+  },
+  folderTitleGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    flex: 1,
+  },
+  folderHeading: {
+    fontSize: '15px',
+    color: '#1F1F1F',
+    fontWeight: 600,
+  },
+  dropdownMenu: {
+    position: 'fixed',
+    zIndex: 99999,
+    backgroundColor: '#FFFFFF',
+    borderRadius: '8px',
+    boxShadow: '0 6px 20px rgba(0, 0, 0, 0.18), 0 1px 4px rgba(0, 0, 0, 0.1)',
+    border: '1px solid #E0E2EC',
+    minWidth: '210px',
+    padding: '6px 0',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  dropdownItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+    padding: '9px 14px',
+    border: 'none',
+    backgroundColor: 'transparent',
+    color: '#1F1F1F',
+    fontSize: '13px',
+    cursor: 'pointer',
+    textAlign: 'left',
+    width: '100%',
+    transition: 'background-color 0.15s ease',
+  },
+  dropdownDivider: {
+    height: '1px',
+    backgroundColor: '#F1F3F4',
+    margin: '4px 0',
   },
   emptyBinBtn: {
     fontSize: '12.5px',
@@ -243,6 +655,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: 'none',
     border: 'none',
     marginLeft: 'auto',
+    flexShrink: 0,
   },
   rowsScroll: {
     flex: 1,

@@ -41,11 +41,20 @@ export const MailPage: React.FC = () => {
     handleEmptyBin,
     handleToggleStar,
     handleToggleSpam,
+    handleMarkRead,
+    handleBatchAction,
     handleCancelScheduled,
     handleRescheduleScheduled,
     setIsComposeOpen,
     setComposePrefill,
   } = useMail();
+
+  const [checkedEmailIds, setCheckedEmailIds] = useState<Set<string>>(new Set());
+
+  // Clear selection when navigating between folders or category tabs
+  useEffect(() => {
+    setCheckedEmailIds(new Set());
+  }, [folder, categoryTab]);
 
   const [isMobile, setIsMobile] = useState<boolean>(() => {
     return typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
@@ -245,6 +254,89 @@ export const MailPage: React.FC = () => {
     void handleRescheduleScheduled(id, scheduledAt).catch((error: unknown) => window.alert(error instanceof Error ? error.message : 'Could not reschedule email.'));
   };
 
+  // Selection & bulk action handlers
+  const handleToggleCheck = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCheckedEmailIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    setCheckedEmailIds((prev) => {
+      if (filteredEmails.length > 0 && filteredEmails.every((e) => prev.has(e.publicId))) {
+        return new Set();
+      } else {
+        return new Set(filteredEmails.map((e) => e.publicId));
+      }
+    });
+  };
+
+  const handleClearSelection = () => {
+    setCheckedEmailIds(new Set());
+  };
+
+  const handleBatchRead = (read: boolean, overrideIds?: string[]) => {
+    const ids = overrideIds && overrideIds.length > 0 ? overrideIds : Array.from(checkedEmailIds);
+    if (ids.length === 0) return;
+    void handleMarkRead(ids, read);
+  };
+
+  const handleBatchStar = (star: boolean, overrideIds?: string[]) => {
+    const ids = overrideIds && overrideIds.length > 0 ? overrideIds : Array.from(checkedEmailIds);
+    if (ids.length === 0) return;
+    void handleBatchAction(ids, star ? 'star' : 'unstar');
+  };
+
+  const handleBatchTrash = () => {
+    const ids = Array.from(checkedEmailIds);
+    if (ids.length === 0) return;
+    setCheckedEmailIds(new Set());
+    void handleBatchAction(ids, 'trash');
+  };
+
+  const handleBatchSpam = (spam: boolean) => {
+    const ids = Array.from(checkedEmailIds);
+    if (ids.length === 0) return;
+    setCheckedEmailIds(new Set());
+    void handleBatchAction(ids, spam ? 'spam' : 'unspam');
+  };
+
+  const handleBatchLabel = (action: 'important' | 'inbox' | 'spam' | 'trash') => {
+    const ids = Array.from(checkedEmailIds);
+    if (ids.length === 0) return;
+    if (action === 'important') {
+      void handleBatchAction(ids, 'star');
+    } else if (action === 'trash') {
+      setCheckedEmailIds(new Set());
+      void handleBatchAction(ids, 'trash');
+    } else if (action === 'spam') {
+      setCheckedEmailIds(new Set());
+      void handleBatchAction(ids, 'spam');
+    }
+  };
+
+  const handleSingleToggleRead = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const mail = emails.find((m) => m.publicId === id);
+    if (mail) {
+      void handleMarkRead([id], !mail.readAt);
+    }
+  };
+
+  const handleSingleDelete = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    handleMoveToBin(id);
+  };
+
+  const handleSingleSpam = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    handleToggleSpam(id, true);
+  };
+
   return (
     <main style={styles.workspaceContainer}>
       {loadError && <div role="alert" style={styles.errorBanner}>{loadError}</div>}
@@ -256,8 +348,20 @@ export const MailPage: React.FC = () => {
         onSelectCategoryTab={setCategoryTab}
         selectedEmailId={selectedEmail ? selectedEmail.publicId : null}
         starredIds={starredIds}
+        checkedEmailIds={checkedEmailIds}
         onSelectEmail={handleSelectEmail}
         onToggleStar={handleToggleStar}
+        onToggleCheck={handleToggleCheck}
+        onToggleSelectAll={handleToggleSelectAll}
+        onBatchRead={handleBatchRead}
+        onBatchStar={handleBatchStar}
+        onBatchTrash={handleBatchTrash}
+        onBatchSpam={handleBatchSpam}
+        onBatchLabel={handleBatchLabel}
+        onClearSelection={handleClearSelection}
+        onSingleToggleRead={handleSingleToggleRead}
+        onSingleDelete={handleSingleDelete}
+        onSingleSpam={handleSingleSpam}
         onEmptyBin={handleEmptyBin}
         onRefresh={loadMail}
         refreshing={refreshing}

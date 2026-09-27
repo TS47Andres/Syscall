@@ -1911,5 +1911,98 @@ input, textarea, select {
   font-weight: 600;
 }
 
+/* ==========================================================================
+   Gmail-style Checkbox & Bulk Actions Toolbar
+   ========================================================================== */
+.gmail-email-row {
+  position: relative;
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
 
+.gmail-email-row:hover {
+  box-shadow: inset 1px 0 0 #DADCE0, inset -1px 0 0 #DADCE0, 0 1px 2px rgba(60, 64, 67, 0.12);
+  z-index: 2;
+}
+
+.gmail-email-row.checked {
+  background-color: #C2E7FF !important;
+}
+
+.gmail-email-row:hover .gmail-row-hover-actions {
+  display: flex !important;
+}
+
+.gmail-email-row:hover .gmail-row-date-group {
+  display: none !important;
+}
+
+.gmail-row-checkbox-btn {
+  border-radius: 4px;
+  transition: background-color 0.15s ease;
+}
+
+.gmail-row-checkbox-btn:hover {
+  background-color: rgba(68, 71, 70, 0.08);
+}
+
+.gmail-row-checkbox-btn:hover .gmail-custom-checkbox {
+  border-color: #1F1F1F !important;
+}
+
+.gmail-row-action-btn:hover {
+  background-color: rgba(68, 71, 70, 0.12) !important;
+}
+
+.gmail-toolbar-icon-btn {
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+}
+
+.gmail-toolbar-icon-btn:hover {
+  background-color: rgba(68, 71, 70, 0.08);
+}
+
+.gmail-toolbar-action-btn {
+  transition: background-color 0.15s ease;
+}
+
+.gmail-toolbar-action-btn:hover {
+  background-color: rgba(68, 71, 70, 0.08) !important;
+}
+
+.gmail-dropdown-menu .dropdown-item:hover,
+.gmail-dropdown-menu button:hover {
+  background-color: #F2F6FC !important;
+}
+
+@media (max-width: 768px) {
+  .hide-on-mobile,
+  .gmail-row-checkbox-btn,
+  .gmail-toolbar-checkbox-btn {
+    display: none !important;
+  }
+
+  .gmail-email-row {
+    padding: 0 10px !important;
+    gap: 8px !important;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  .gmail-row-hover-actions {
+    display: none !important;
+  }
+
+  .gmail-row-date-group {
+    display: flex !important;
+  }
+}
 

@@ -37,6 +37,8 @@ interface MailContextType {
   handleEmptyBin: () => void;
   handleToggleStar: (id: string, event?: React.MouseEvent) => void;
   handleToggleSpam: (id: string, spam: boolean) => void;
+  handleMarkRead: (ids: string[], read: boolean) => Promise<void>;
+  handleBatchAction: (ids: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam') => Promise<void>;
   handleSendMail: (to: string, subject: string, body: string, attachments?: File[], replyToId?: string, draftId?: string) => Promise<void>;
   handleSaveDraft: (to: string, subject: string, body: string, attachments?: File[], draftId?: string) => Promise<void>;
   handleScheduleMail: (to: string, subject: string, body: string, scheduledAt: string, attachments?: File[]) => Promise<void>;
@@ -167,6 +169,55 @@ export const MailProvider: React.FC<MailProviderProps> = ({ initialUser, onSignO
   // Persists recipient-owned spam classification and reloads affected folders.
   const handleToggleSpam = useCallback((id: string, spam: boolean): void => { void api.setSpam(id, spam).then(loadMail).catch((reason) => setLoadError(reason instanceof Error ? reason.message : 'Could not update spam status.')); }, [loadMail]);
 
+  // Marks one or more messages as read or unread with optimistic state update.
+  const handleMarkRead = useCallback(async (ids: string[], read: boolean): Promise<void> => {
+    if (ids.length === 0) return;
+    const nowIso = new Date().toISOString();
+    setEmails((prev) =>
+      prev.map((mail) => (ids.includes(mail.publicId) ? { ...mail, readAt: read ? (mail.readAt || nowIso) : null } : mail))
+    );
+    try {
+      await api.batchMailAction(ids, read ? 'read' : 'unread');
+      await loadMail();
+    } catch (reason) {
+      setLoadError(reason instanceof Error ? reason.message : 'Could not update read status.');
+      await loadMail();
+    }
+  }, [loadMail]);
+
+  // Executes a batch action across multiple messages with optimistic state updates.
+  const handleBatchAction = useCallback(async (ids: string[], action: 'read' | 'unread' | 'trash' | 'star' | 'unstar' | 'spam' | 'unspam'): Promise<void> => {
+    if (ids.length === 0) return;
+    const nowIso = new Date().toISOString();
+    if (action === 'read' || action === 'unread') {
+      setEmails((prev) =>
+        prev.map((mail) => (ids.includes(mail.publicId) ? { ...mail, readAt: action === 'read' ? (mail.readAt || nowIso) : null } : mail))
+      );
+    } else if (action === 'trash') {
+      setTrashIds((prev) => new Set([...prev, ...ids]));
+    } else if (action === 'star') {
+      setStarredIds((prev) => new Set([...prev, ...ids]));
+    } else if (action === 'unstar') {
+      setStarredIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
+    } else if (action === 'spam' || action === 'unspam') {
+      setEmails((prev) =>
+        prev.map((mail) => (ids.includes(mail.publicId) ? { ...mail, isSpam: action === 'spam' } : mail))
+      );
+    }
+
+    try {
+      await api.batchMailAction(ids, action);
+      await loadMail();
+    } catch (reason) {
+      setLoadError(reason instanceof Error ? reason.message : `Could not perform batch action ${action}.`);
+      await loadMail();
+    }
+  }, [loadMail]);
+
   // Queues a real message or threaded reply, then reloads mailbox state.
   const handleSendMail = useCallback(async (to: string, subject: string, body: string, attachments?: File[], replyToId?: string, draftId?: string): Promise<void> => {
     if (draftId) { await api.updateDraft(draftId, { recipientAddress: to, subject, textBody: body }, attachments); await api.sendDraft(draftId); }
@@ -260,6 +311,8 @@ export const MailProvider: React.FC<MailProviderProps> = ({ initialUser, onSignO
         handleEmptyBin,
         handleToggleStar,
         handleToggleSpam,
+        handleMarkRead,
+        handleBatchAction,
         handleSendMail,
         handleSaveDraft,
         handleScheduleMail,

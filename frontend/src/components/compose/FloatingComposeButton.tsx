@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconCompose } from '../Icons';
+import { IconCompose, IconSarvamAI } from '../Icons';
 import { useMail } from '../../context/MailContext';
 import { t } from '../../utils/i18n';
 
@@ -15,14 +15,26 @@ export const FloatingComposeButton: React.FC<FloatingComposeButtonProps> = ({
   const composeText = t('compose', lang);
 
   return (
-    <button
-      className="gmail-fab"
-      onClick={onOpenCompose}
-      title={composeText}
-      type="button"
-    >
-      <IconCompose size={20} color="#001D35" />
-      <span>{composeText}</span>
-    </button>
+    <div className="floating-actions-container">
+      {/* Sarvam AI Logo / Launcher (Pure zoom on hover, transparent bg, same as laptop device) */}
+      <button
+        type="button"
+        className="sarvam-ai-btn sarvam-ai-fab"
+        title="Sarvam AI Agent (Coming soon)"
+        aria-label="Sarvam AI Agent"
+      >
+        <IconSarvamAI size={26} />
+      </button>
+
+      <button
+        className="gmail-fab"
+        onClick={onOpenCompose}
+        title={composeText}
+        type="button"
+      >
+        <IconCompose size={20} color="#001D35" />
+        <span>{composeText}</span>
+      </button>
+    </div>
   );
 };

@@ -1,5 +1,5 @@
 # File: tailscale-funnel.ps1
-# Role: Publishes only Telnyx webhook and voice-media routes through Tailscale Funnel.
+# Role: Publishes the API backend plus Telnyx webhook and voice-media routes through Tailscale Funnel.
 # Service: Syscall deployment helper.
 param(
   [switch]$Status,
@@ -46,15 +46,19 @@ try {
   throw "Syscall voice agent is not healthy at $voiceHealthUrl. Start it with 'docker compose --profile voice up -d --build' after configuring SARVAM_API_KEY and VOICE_AGENT_API_TOKEN. Details: $($_.Exception.Message)"
 }
 
-Write-Host 'Publishing only the Telnyx webhook paths and /voice-stream through Tailscale Funnel.'
+Write-Host "Publishing the API backend through Tailscale Funnel at https://<device>.ts.net -> http://127.0.0.1:$apiPort."
+Write-Host 'The API is publicly reachable through HTTPS on Funnel port 443; Tailscale forwards it to the local backend port.'
 Write-Host 'The host-side API port is loopback-only; MongoDB, Redis, SMTP, and ClamAV remain private.'
-Write-Host 'Copy the https://*.ts.net hostname printed by Tailscale into PUBLIC_WEBHOOK_BASE_URL in .env.'
 
-$webhookArguments = @('--bg', '--https=443', '--set-path=/webhooks/telnyx/', "http://127.0.0.1:$apiPort/webhooks/telnyx/")
+$apiArguments = @('--bg', '--https=443', '--set-path=/', '--yes', "http://127.0.0.1:$apiPort")
+& $tailscalePath funnel @apiArguments
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+$webhookArguments = @('--bg', '--https=443', '--set-path=/webhooks/telnyx/', '--yes', "http://127.0.0.1:$apiPort/webhooks/telnyx/")
 & $tailscalePath funnel @webhookArguments
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$voiceArguments = @('--bg', '--https=443', '--set-path=/voice-stream', "http://127.0.0.1:$voiceAgentPort/voice-stream")
+$voiceArguments = @('--bg', '--https=443', '--set-path=/voice-stream', '--yes', "http://127.0.0.1:$voiceAgentPort/voice-stream")
 & $tailscalePath funnel @voiceArguments
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

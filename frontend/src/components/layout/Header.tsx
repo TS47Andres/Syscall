@@ -98,7 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   return (
-    <header style={styles.header} className="gmail-top-header">
+    <header style={styles.header} className={`gmail-top-header ${isFilterOpen ? 'filter-open' : ''}`}>
       {/* Left: Brand Identity + Hamburger (Desktop only) */}
       <div style={styles.leftBrand} className="desktop-only">
         <button
@@ -162,6 +162,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         <button
           type="button"
+          className="gmail-filter-btn"
           onClick={() => setIsFilterOpen(!isFilterOpen)}
           style={{
             ...styles.filterToggleBtn,
@@ -182,6 +183,7 @@ export const Header: React.FC<HeaderProps> = ({
           onApplyFilters={(newFilters) => setSearchFilters(newFilters)}
           onResetFilters={resetSearchFilters}
           currentLanguage={currentUser.language}
+          isMobile={isMobile}
         />
       </div>}
 
@@ -203,8 +205,10 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         {/* Profile Avatar Button */}
-        <div
+        <button
+          type="button"
           style={styles.avatarBtn}
+          className="gmail-header-profile-button"
           onClick={onProfileClick}
           title={isProfilePageOpen ? 'Back to Mailbox' : `Account Profile: ${currentUser.name || currentUser.emailAddress}`}
         >
@@ -213,7 +217,7 @@ export const Header: React.FC<HeaderProps> = ({
           ) : (
             getInitials(currentUser.name)
           )}
-        </div>
+        </button>
       </div>
     </header>
   );
@@ -391,6 +395,8 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     border: 'none',
     outline: 'none',
+    padding: 0,
+    fontFamily: 'inherit',
   },
   avatarImg: {
     width: '100%',

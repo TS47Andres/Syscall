@@ -127,20 +127,15 @@ export const EmailList: React.FC<EmailListProps> = ({
 
   useEffect(() => {
     if (!isMenuOpen) return;
-    const onDocClick = (e: MouseEvent | TouchEvent) => {
+    const onDocPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (menuRef.current && menuRef.current.contains(target)) return;
       if (buttonRef.current && buttonRef.current.contains(target)) return;
       setIsMenuOpen(false);
     };
-    const timer = setTimeout(() => {
-      document.addEventListener('click', onDocClick);
-      document.addEventListener('touchstart', onDocClick);
-    }, 10);
+    document.addEventListener('pointerdown', onDocPointerDown);
     return () => {
-      clearTimeout(timer);
-      document.removeEventListener('click', onDocClick);
-      document.removeEventListener('touchstart', onDocClick);
+      document.removeEventListener('pointerdown', onDocPointerDown);
     };
   }, [isMenuOpen]);
 

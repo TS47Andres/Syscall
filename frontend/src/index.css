@@ -401,11 +401,19 @@ input, textarea, select {
     padding: 6px 12px !important;
     gap: 10px !important;
     width: 100% !important;
+    min-width: 0 !important;
     box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  .gmail-top-header.filter-open {
+    overflow: visible !important;
+    z-index: 700 !important;
   }
 
   .gmail-search-pill {
-    flex: 1 !important;
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
     max-width: 100% !important;
     height: 44px !important;
     padding: 0 10px 0 6px !important;
@@ -425,7 +433,18 @@ input, textarea, select {
   }
 
   .gmail-header-right {
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    min-width: 36px !important;
     gap: 6px !important;
+  }
+
+  .gmail-header-profile-button {
+    width: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px !important;
+    flex: 0 0 36px !important;
+    margin: 0 !important;
   }
 
   .gmail-header-right.hide-on-mobile-filter {
@@ -441,7 +460,7 @@ input, textarea, select {
     right: 0 !important;
     bottom: 0 !important;
     background-color: rgba(0, 0, 0, 0.38) !important;
-    z-index: 550 !important;
+    z-index: 1000 !important;
     backdrop-filter: blur(2px) !important;
     -webkit-backdrop-filter: blur(2px) !important;
   }
@@ -455,6 +474,13 @@ input, textarea, select {
   }
 
   .search-bar-extended-panel {
+    position: fixed !important;
+    top: 56px !important;
+    left: 12px !important;
+    right: 12px !important;
+    width: auto !important;
+    z-index: 1001 !important;
+    background-color: #FFFFFF !important;
     max-height: calc(100dvh - 68px) !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
@@ -613,6 +639,34 @@ input, textarea, select {
     z-index: 10 !important;
     border-top: 1px solid #F1F3F4 !important;
     margin-top: auto !important;
+    gap: 4px !important;
+  }
+
+  .syscall-compose-modal .compose-action-row > div:first-child {
+    gap: 2px !important;
+    min-width: 0 !important;
+  }
+
+  .syscall-compose-modal .compose-action-row > div:first-child button {
+    padding: 6px 6px !important;
+    font-size: 12px !important;
+    white-space: nowrap !important;
+  }
+
+  .syscall-compose-modal .compose-action-row button[type="submit"] {
+    min-height: 42px !important;
+    min-width: 130px !important;
+    max-width: 156px !important;
+    padding: 0 10px !important;
+    border-radius: 21px !important;
+    font-size: 12px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    gap: 6px !important;
+  }
+
+  .syscall-compose-modal .compose-action-row button[type="submit"] svg {
+    flex-shrink: 0 !important;
   }
 
   .gmail-fab {
@@ -2124,8 +2178,12 @@ input, textarea, select {
   }
 
   .gmail-email-row {
-    padding: 0 10px !important;
-    gap: 8px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    padding: 0 8px !important;
+    gap: 6px !important;
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
@@ -2137,6 +2195,40 @@ input, textarea, select {
 
   .gmail-row-date-group {
     display: flex !important;
+    flex: 0 0 auto !important;
+    min-width: 0 !important;
+    gap: 4px !important;
+  }
+
+  /* Touch browsers can keep :hover active after a tap; keep dates visible. */
+  .gmail-email-row:hover .gmail-row-hover-actions {
+    display: none !important;
+  }
+
+  .gmail-email-row:hover .gmail-row-date-group {
+    display: flex !important;
+  }
+
+  .gmail-row-sender {
+    width: auto !important;
+    min-width: 0 !important;
+    flex: 0 1 32% !important;
+  }
+
+  .gmail-row-snippet {
+    width: 0 !important;
+    min-width: 0 !important;
+    flex: 1 1 0 !important;
+  }
+
+  .gmail-row-date-text {
+    width: auto !important;
+    min-width: 42px !important;
+    max-width: 52px !important;
+    flex: 0 0 auto !important;
+    text-align: right !important;
+    white-space: nowrap !important;
+    font-size: 11px !important;
   }
 
   .profile-page-shell {

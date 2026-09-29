@@ -4,6 +4,7 @@
  * Service: Frontend.
  */
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import type { EmailSearchFilters } from '../../types';
 import { IconSearch } from '../Icons';
 import { t } from '../../utils/i18n';
@@ -15,6 +16,7 @@ interface SearchFilterDropdownProps {
   onApplyFilters: (filters: EmailSearchFilters) => void;
   onResetFilters: () => void;
   currentLanguage?: string;
+  isMobile?: boolean;
 }
 
 interface DropdownOption<T extends string> {
@@ -119,6 +121,7 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
   onApplyFilters,
   onResetFilters,
   currentLanguage = 'en',
+  isMobile = false,
 }) => {
   const [localFilters, setLocalFilters] = useState<EmailSearchFilters>(filters);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -168,7 +171,7 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
     onClose();
   };
 
-  return (
+  const filterPanel = (
     <>
       {/* Mobile Backdrop to dim background and allow closing on outside tap */}
       <div className="search-filter-backdrop" onClick={onClose} />
@@ -349,6 +352,8 @@ export const SearchFilterDropdown: React.FC<SearchFilterDropdownProps> = ({
     </div>
     </>
   );
+
+  return isMobile ? createPortal(filterPanel, document.body) : filterPanel;
 };
 
 const styles: Record<string, React.CSSProperties> = {

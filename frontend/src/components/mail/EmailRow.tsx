@@ -179,14 +179,14 @@ export const EmailRow: React.FC<EmailRowProps> = ({
       </div>
 
       {/* Sender Name / Phone */}
-      <div style={styles.senderCol} title={displayedAddress}>
+      <div className="gmail-row-sender" style={styles.senderCol} title={displayedAddress}>
         <span style={{ fontSize: 13.5, color: '#1F1F1F' }}>
           {displayedName?.trim() || formatPhone(displayedAddress)}
         </span>
       </div>
 
       {/* Subject + Snippet Preview */}
-      <div style={styles.snippetCol}>
+      <div className="gmail-row-snippet" style={styles.snippetCol}>
         <span style={{ ...styles.subjectText, color: isUnread ? '#1F1F1F' : '#444746' }}>
           {email.subject}
         </span>
@@ -256,7 +256,7 @@ export const EmailRow: React.FC<EmailRowProps> = ({
           </span>
         )}
 
-        <span style={styles.dateText}>
+        <span className="gmail-row-date-text" style={styles.dateText}>
           {new Date(email.createdAt).toLocaleDateString([], {
             month: 'short',
             day: 'numeric',

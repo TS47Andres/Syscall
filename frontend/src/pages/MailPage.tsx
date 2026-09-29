@@ -3,7 +3,8 @@
  * Role: Filters backend mailbox records and routes mail actions to the context.
  * Service: Frontend.
  */
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { useMail } from '../context/MailContext';
 import type { Email } from '../types';
@@ -52,6 +53,33 @@ export const MailPage: React.FC = () => {
   } = useMail();
 
   const [checkedEmailIds, setCheckedEmailIds] = useState<Set<string>>(new Set());
+  const [undoAction, setUndoAction] = useState<{ kind: 'trash' | 'archive' | 'unarchive'; ids: string[] } | null>(null);
+
+  const showUndoAction = useCallback((kind: 'trash' | 'archive' | 'unarchive', ids: string[]) => {
+    if (ids.length) setUndoAction({ kind, ids: [...ids] });
+  }, []);
+
+  useEffect(() => {
+    if (!undoAction) return;
+    const timeout = window.setTimeout(() => setUndoAction(null), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [undoAction]);
+
+  const undoLastAction = async () => {
+    if (!undoAction) return;
+    const pending = undoAction;
+    setUndoAction(null);
+    try {
+      if (pending.kind === 'trash') {
+        await Promise.all(pending.ids.map((id) => api.restoreEmail(id)));
+        await loadMail();
+      } else {
+        await handleBatchAction(pending.ids, pending.kind === 'archive' ? 'unarchive' : 'archive');
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not undo that action.');
+    }
+  };
 
   // Clear selection when navigating between folders or category tabs
   useEffect(() => {
@@ -234,6 +262,7 @@ export const MailPage: React.FC = () => {
   };
 
   const onDeleteFromPane = (id: string) => {
+    showUndoAction('trash', [id]);
     handleMoveToBin(id);
     navigate(`/mail/${folder}`);
   };
@@ -299,6 +328,7 @@ export const MailPage: React.FC = () => {
     const ids = Array.from(checkedEmailIds);
     if (ids.length === 0) return;
     setCheckedEmailIds(new Set());
+    showUndoAction('trash', ids);
     void handleBatchAction(ids, 'trash');
   };
 
@@ -328,12 +358,17 @@ export const MailPage: React.FC = () => {
         onClear={handleClearSelection}
         onArchive={() => {
           setCheckedEmailIds(new Set());
-          void handleBatchAction(selectedIds, allArchived ? 'unarchive' : 'archive');
+          const action = allArchived ? 'unarchive' : 'archive';
+          showUndoAction(action, selectedIds);
+          void handleBatchAction(selectedIds, action);
         }}
         onDelete={() => {
           setCheckedEmailIds(new Set());
           if (inBin) selectedIds.forEach(handlePermanentDelete);
-          else void handleBatchAction(selectedIds, 'trash');
+          else {
+            showUndoAction('trash', selectedIds);
+            void handleBatchAction(selectedIds, 'trash');
+          }
         }}
         onMarkRead={(read) => void handleMarkRead(selectedIds, read)}
         onStar={() => void handleBatchAction(selectedIds, selectedMessages.every((mail) => starredIds.has(mail.publicId)) ? 'unstar' : 'star')}
@@ -344,7 +379,7 @@ export const MailPage: React.FC = () => {
         }}
       />
     );
-  }, [selectedIds, emails, folder, handleBatchAction, handleMarkRead, handlePermanentDelete, handleClearSelection, starredIds]);
+  }, [selectedIds, emails, folder, handleBatchAction, handleMarkRead, handlePermanentDelete, handleClearSelection, showUndoAction, starredIds]);
 
   useEffect(() => {
     setMobileSelectionToolbar(mobileSelectionToolbar);
@@ -359,6 +394,7 @@ export const MailPage: React.FC = () => {
       void handleBatchAction(ids, 'star');
     } else if (action === 'trash') {
       setCheckedEmailIds(new Set());
+      showUndoAction('trash', ids);
       void handleBatchAction(ids, 'trash');
     } else if (action === 'spam') {
       setCheckedEmailIds(new Set());
@@ -376,6 +412,7 @@ export const MailPage: React.FC = () => {
 
   const handleSingleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    showUndoAction('trash', [id]);
     handleMoveToBin(id);
   };
 
@@ -385,6 +422,7 @@ export const MailPage: React.FC = () => {
   };
 
   return (
+    <>
     <main style={styles.workspaceContainer}>
       {loadError && <div role="alert" style={styles.errorBanner}>{loadError}</div>}
       {/* Email List View */}
@@ -434,6 +472,48 @@ export const MailPage: React.FC = () => {
         />
       )}
     </main>
+    {undoAction && createPortal(
+      <div
+        role="status"
+        aria-live="polite"
+        style={{
+          position: 'fixed',
+          zIndex: 1100,
+          left: '50%',
+          bottom: 'calc(20px + env(safe-area-inset-bottom, 0px))',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 20,
+          width: 'max-content',
+          maxWidth: 'calc(100vw - 24px)',
+          padding: '8px 12px 8px 16px',
+          borderRadius: 8,
+          backgroundColor: '#323232',
+          color: '#FFFFFF',
+          boxShadow: '0 4px 16px rgba(0,0,0,.24)',
+          fontSize: 13,
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {undoAction.kind === 'trash'
+            ? `${undoAction.ids.length} ${undoAction.ids.length === 1 ? 'message' : 'messages'} moved to Bin`
+            : undoAction.kind === 'archive'
+              ? `${undoAction.ids.length} ${undoAction.ids.length === 1 ? 'message' : 'messages'} archived`
+              : `${undoAction.ids.length} ${undoAction.ids.length === 1 ? 'message' : 'messages'} moved to inbox`}
+        </span>
+        <button
+          type="button"
+          onClick={() => void undoLastAction()}
+          style={{ border: 0, background: 'transparent', color: '#A8C7FA', fontWeight: 700, fontSize: 13, cursor: 'pointer', padding: '8px 4px' }}
+        >
+          Undo
+        </button>
+      </div>,
+      document.body,
+    )}
+    </>
   );
 };
 

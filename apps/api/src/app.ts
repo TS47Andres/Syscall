@@ -11,7 +11,7 @@ import cors from '@fastify/cors';
 import { z } from 'zod';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
-import { AuditLog, Draft, Email, User, WebhookEvent, pingDatabase, type UserDocument } from '@syscall/db';
+import { AuditLog, Draft, Email, PushDevice, User, WebhookEvent, pingDatabase, type UserDocument } from '@syscall/db';
 import { createOutboundEmailQueue, createSmsQueue, createUnreadEmailSmsQueue, queueEmailFailureSms } from '@syscall/queues';
 import { answerInboundCall, gatherOtpDigits, hangupCall, startCallStreaming, startOutboundCall, verifyWebhookSignature, webhookUrl } from '@syscall/telnyx';
 import { isTelnyxConfigured } from '@syscall/config';
@@ -150,6 +150,22 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
 
   // Returns the account associated with the authenticated browser session.
   app.get('/api/auth/me', async (request) => ({ user: publicUser(await requireUser(request)) }));
+
+  // Registers a notification token for this signed-in account and mobile platform.
+  app.post('/api/push/devices', async (request) => {
+    const user = await requireUser(request);
+    const body = z.object({ token: z.string().min(20).max(256).regex(/^(Expo|Exponent)PushToken\[[^\]]+\]$/), platform: z.enum(['ios', 'android']) }).parse(request.body);
+    await PushDevice.findOneAndUpdate({ token: body.token }, { $set: { userId: user._id, platform: body.platform } }, { upsert: true, new: true, setDefaultsOnInsert: true });
+    return { status: 'registered' };
+  });
+
+  // Removes the current installation's notification token, usually on sign out.
+  app.delete('/api/push/devices', async (request) => {
+    const user = await requireUser(request);
+    const body = z.object({ token: z.string().min(20).max(256) }).parse(request.body);
+    await PushDevice.deleteOne({ userId: user._id, token: body.token });
+    return { status: 'removed' };
+  });
 
   app.get('/ready', async (_request, reply) => {
     const mongoReady = await pingDatabase();

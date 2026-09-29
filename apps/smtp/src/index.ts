@@ -7,7 +7,7 @@ import { SMTPServer, type SMTPServerSession } from 'smtp-server';
 import { AuditLog, Email, User, connectDatabase, disconnectDatabase } from '@syscall/db';
 import { loadConfig } from '@syscall/config';
 import { createLogger } from '@syscall/logging';
-import { createRedisConnection, createUnreadEmailSmsQueue } from '@syscall/queues';
+import { createPushQueue, createRedisConnection, createUnreadEmailSmsQueue } from '@syscall/queues';
 import { parseMime, scanWithClamAv, validateAttachment, writeGeneratedFile } from '@syscall/mail';
 import { v7 as uuidv7 } from 'uuid';
 
@@ -18,14 +18,15 @@ async function start(): Promise<void> {
   await connectDatabase(config.MONGODB_URI);
   const redis = createRedisConnection(config.REDIS_URL);
   const unreadQueue = createUnreadEmailSmsQueue(redis);
+  const pushQueue = createPushQueue(redis);
   const server = new SMTPServer({
     disabledCommands: ['AUTH'],
     size: config.SMTP_MAX_MESSAGE_SIZE_MB * 1024 * 1024,
     onMailFrom(address, _session, callback) { void validateMailFrom(address.address, config.LOCAL_MAIL_DOMAIN).then(() => callback()).catch((error: unknown) => callback(smtpError(550, errorMessage(error)))); },
     onRcptTo(address, _session, callback) { void validateMailRecipient(address.address, config.LOCAL_MAIL_DOMAIN).then(() => callback()).catch((error: unknown) => callback(smtpError(550, errorMessage(error)))); },
-    onData(stream, session, callback) { void processMessage(stream, session, config, unreadQueue).then(() => callback()).catch(async (error: unknown) => { logger.error({ err: error }, 'SMTP message rejected'); await AuditLog.create({ eventType: 'email_rejected', metadata: { reason: errorMessage(error).slice(0, 500) } }); callback(smtpError(error instanceof TemporaryMailError ? 451 : 550, errorMessage(error))); }); },
+    onData(stream, session, callback) { void processMessage(stream, session, config, unreadQueue, pushQueue).then(() => callback()).catch(async (error: unknown) => { logger.error({ err: error }, 'SMTP message rejected'); await AuditLog.create({ eventType: 'email_rejected', metadata: { reason: errorMessage(error).slice(0, 500) } }); callback(smtpError(error instanceof TemporaryMailError ? 451 : 550, errorMessage(error))); }); },
   });
-  const shutdown = async (signal: string): Promise<void> => { logger.info({ signal }, 'Shutting down SMTP'); await new Promise<void>((resolve) => server.close(() => resolve())); await redis.quit(); await disconnectDatabase(); process.exit(0); };
+  const shutdown = async (signal: string): Promise<void> => { logger.info({ signal }, 'Shutting down SMTP'); await new Promise<void>((resolve) => server.close(() => resolve())); await Promise.all([unreadQueue.close(), pushQueue.close()]); await redis.quit(); await disconnectDatabase(); process.exit(0); };
   process.once('SIGINT', () => void shutdown('SIGINT')); process.once('SIGTERM', () => void shutdown('SIGTERM'));
   await new Promise<void>((resolve, reject) => server.listen(config.SMTP_PORT, '0.0.0.0', (error?: Error) => error ? reject(error) : resolve()));
   logger.info({ port: config.SMTP_PORT }, 'Internal SMTP listening');
@@ -44,7 +45,7 @@ async function validateMailRecipient(address: string, domain: string): Promise<v
 }
 
 // Stores one accepted MIME message and schedules its durable unread notification check.
-async function processMessage(stream: NodeJS.ReadableStream, session: SMTPServerSession, config: ReturnType<typeof loadConfig>, unreadQueue: ReturnType<typeof createUnreadEmailSmsQueue>): Promise<void> {
+async function processMessage(stream: NodeJS.ReadableStream, session: SMTPServerSession, config: ReturnType<typeof loadConfig>, unreadQueue: ReturnType<typeof createUnreadEmailSmsQueue>, pushQueue: ReturnType<typeof createPushQueue>): Promise<void> {
   const raw = await readStream(stream, config.SMTP_MAX_MESSAGE_SIZE_MB * 1024 * 1024);
   try { await scanWithClamAv(config.CLAMAV_HOST, config.CLAMAV_PORT, raw); } catch (error) { if (errorMessage(error).includes('Malware detected')) { await AuditLog.create({ eventType: 'malware_detected', metadata: { messageSize: raw.length } }); throw new PermanentMailError(errorMessage(error)); } throw new TemporaryMailError(errorMessage(error)); }
   const parsed = await parseMime(raw);
@@ -60,6 +61,7 @@ async function processMessage(stream: NodeJS.ReadableStream, session: SMTPServer
   if (existingEmail) { existingEmail.rawMimePath = rawMimePath; existingEmail.deliveryStatus = 'delivered'; existingEmail.deliveredAt = new Date(); existingEmail.lastDeliveryError = null; await existingEmail.save(); }
   await AuditLog.create({ eventType: 'email_accepted', relatedEntityIds: [email.publicId], metadata: { senderAddress, recipientAddress } });
   await unreadQueue.add('unread-email', { emailId: email.publicId }, { delay: 60000, attempts: 3, backoff: { type: 'fixed', delay: 10000 } });
+  await pushQueue.add('new-email-push', { emailId: email.publicId }, { jobId: `new-email-${email.publicId}` });
 }
 
 // Reads a stream with an explicit message-size ceiling.

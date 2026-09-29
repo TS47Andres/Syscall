@@ -104,6 +104,14 @@ export interface WebhookEventDocument extends Document {
   receivedAt: Date;
 }
 
+export interface PushDeviceDocument extends Document {
+  userId: mongoose.Types.ObjectId;
+  token: string;
+  platform: 'ios' | 'android';
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 const attachmentSchema = new Schema<AttachmentMetadata>({
   storageKey: { type: String, required: true },
   originalFilename: { type: String, required: true },
@@ -200,12 +208,19 @@ const webhookSchema = new Schema<WebhookEventDocument>({
 }, { timestamps: { createdAt: false, updatedAt: false } });
 webhookSchema.add({ receivedAt: { type: Date, required: true, default: Date.now } });
 
+const pushDeviceSchema = new Schema<PushDeviceDocument>({
+  userId: { type: Schema.Types.ObjectId, required: true, ref: 'User', index: true },
+  token: { type: String, required: true, unique: true, maxlength: 256 },
+  platform: { type: String, enum: ['ios', 'android'], required: true },
+}, { timestamps: true });
+
 export const User: Model<UserDocument> = mongoose.models.User ?? mongoose.model<UserDocument>('User', userSchema);
 export const Email: Model<EmailDocument> = mongoose.models.Email ?? mongoose.model<EmailDocument>('Email', emailSchema);
 export const Draft: Model<DraftDocument> = mongoose.models.Draft ?? mongoose.model<DraftDocument>('Draft', draftSchema);
 export const ResetToken: Model<ResetTokenDocument> = mongoose.models.ResetToken ?? mongoose.model<ResetTokenDocument>('ResetToken', resetTokenSchema);
 export const AuditLog: Model<AuditLogDocument> = mongoose.models.AuditLog ?? mongoose.model<AuditLogDocument>('AuditLog', auditSchema);
 export const WebhookEvent: Model<WebhookEventDocument> = mongoose.models.WebhookEvent ?? mongoose.model<WebhookEventDocument>('WebhookEvent', webhookSchema);
+export const PushDevice: Model<PushDeviceDocument> = mongoose.models.PushDevice ?? mongoose.model<PushDeviceDocument>('PushDevice', pushDeviceSchema);
 
 // Opens the shared MongoDB connection and fails loudly if the dependency is unavailable.
 export async function connectDatabase(uri: string): Promise<void> {

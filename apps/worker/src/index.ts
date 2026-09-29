@@ -6,10 +6,10 @@
 import fs from 'node:fs/promises';
 import nodemailer from 'nodemailer';
 import { Worker, type Job } from 'bullmq';
-import { Email, User, AuditLog, connectDatabase, disconnectDatabase, type EmailDocument } from '@syscall/db';
+import { Email, PushDevice, User, AuditLog, connectDatabase, disconnectDatabase, type EmailDocument } from '@syscall/db';
 import { loadConfig } from '@syscall/config';
 import { createLogger } from '@syscall/logging';
-import { createOutboundEmailQueue, createRedisConnection, QUEUE_NAMES, createSmsQueue, enqueueScheduledEmail, queueEmailFailureSms, scheduledEmailJobId, type OutboundEmailJob, type SmsSendJob, type UnreadEmailSmsJob } from '@syscall/queues';
+import { createOutboundEmailQueue, createPushQueue, createRedisConnection, QUEUE_NAMES, createSmsQueue, enqueueScheduledEmail, queueEmailFailureSms, scheduledEmailJobId, type OutboundEmailJob, type PushSendJob, type SmsSendJob, type UnreadEmailSmsJob } from '@syscall/queues';
 import { sendSms } from '@syscall/telnyx';
 
 // Starts all asynchronous workers after configuration and infrastructure validation.
@@ -18,9 +18,11 @@ async function start(): Promise<void> {
   const smtpTransport = nodemailer.createTransport({ host: config.SMTP_HOST, port: config.SMTP_PORT, secure: false, ignoreTLS: true });
   const outboundQueue = createOutboundEmailQueue(redis);
   const smsQueue = createSmsQueue(redis);
+  const pushQueue = createPushQueue(redis);
   const outboundWorker = new Worker<OutboundEmailJob>(QUEUE_NAMES.outboundEmail, async (job) => deliverEmail(job, smtpTransport, config, smsQueue, logger), { connection: redis, settings: { backoffStrategy: (attemptsMade) => [10000, 30000, 60000][attemptsMade] ?? 60000 } });
   const unreadWorker = new Worker<UnreadEmailSmsJob>(QUEUE_NAMES.unreadEmailSms, async (job) => notifyUnreadEmail(job, redis), { connection: redis });
   const smsWorker = new Worker<SmsSendJob>(QUEUE_NAMES.smsSend, async (job) => deliverSms(job, config, logger), { connection: redis });
+  const pushWorker = new Worker<PushSendJob>(QUEUE_NAMES.pushSend, async (job) => deliverPush(job, logger), { connection: redis });
   let recoveringSchedules = false;
   const recoverSchedules = async (): Promise<void> => {
     if (recoveringSchedules) return;
@@ -31,10 +33,30 @@ async function start(): Promise<void> {
   await recoverSchedules();
   const scheduleRecoveryTimer = setInterval(() => void recoverSchedules().catch((error) => logger.error({ err: error }, 'Scheduled email recovery pass failed')), 30000);
   scheduleRecoveryTimer.unref();
-  for (const worker of [outboundWorker, unreadWorker, smsWorker]) worker.on('failed', (job, error) => logger.error({ queue: worker.name, jobId: job?.id, err: error }, 'Background job failed'));
-  const shutdown = async (signal: string): Promise<void> => { logger.info({ signal }, 'Shutting down worker'); clearInterval(scheduleRecoveryTimer); await Promise.all([outboundWorker.close(), unreadWorker.close(), smsWorker.close(), outboundQueue.close()]); await redis.quit(); await disconnectDatabase(); process.exit(0); };
+  for (const worker of [outboundWorker, unreadWorker, smsWorker, pushWorker]) worker.on('failed', (job, error) => logger.error({ queue: worker.name, jobId: job?.id, err: error }, 'Background job failed'));
+  const shutdown = async (signal: string): Promise<void> => { logger.info({ signal }, 'Shutting down worker'); clearInterval(scheduleRecoveryTimer); await Promise.all([outboundWorker.close(), unreadWorker.close(), smsWorker.close(), pushWorker.close(), outboundQueue.close(), pushQueue.close()]); await redis.quit(); await disconnectDatabase(); process.exit(0); };
   process.once('SIGINT', () => void shutdown('SIGINT')); process.once('SIGTERM', () => void shutdown('SIGTERM'));
   logger.info('Syscall workers listening');
+}
+
+// Sends a privacy-conscious push to each active mobile installation for newly accepted mail.
+async function deliverPush(job: Job<PushSendJob>, logger: ReturnType<typeof createLogger>): Promise<void> {
+  const email = await Email.findOne({ publicId: job.data.emailId, deliveryStatus: 'delivered', recipientDeletedAt: null, isSpam: false }).lean();
+  if (!email) return;
+  const devices = await PushDevice.find({ userId: email.recipientUserId }).lean();
+  if (!devices.length) return;
+  const messages = devices.map((device) => ({ to: device.token, title: 'New email', body: 'You have received a new email.', sound: 'default', channelId: 'mail', data: { emailId: email.publicId, folder: 'inbox' }, priority: 'high' }));
+  const response = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip, deflate', 'Content-Type': 'application/json' }, body: JSON.stringify(messages) });
+  if (!response.ok) throw new Error(`Expo push service returned HTTP ${response.status}.`);
+  const result = await response.json() as { data?: Array<{ status?: string; message?: string; details?: { error?: string } }> };
+  const tickets = result.data ?? [];
+  for (const [index, ticket] of tickets.entries()) {
+    if (ticket.status === 'error' && ticket.details?.error === 'DeviceNotRegistered') {
+      await PushDevice.deleteOne({ token: devices[index]?.token });
+      continue;
+    }
+    if (ticket.status === 'error') logger.warn({ error: ticket.message, deviceId: String(devices[index]?._id) }, 'Expo push ticket was rejected');
+  }
 }
 
 // Recreates missing or exhausted delayed jobs from scheduled MongoDB records.

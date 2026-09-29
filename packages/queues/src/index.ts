@@ -10,6 +10,7 @@ export const QUEUE_NAMES = {
   outboundEmail: 'outbound-email',
   unreadEmailSms: 'unread-email-sms',
   smsSend: 'sms-send',
+  pushSend: 'push-send',
 } as const;
 
 export interface OutboundEmailJob {
@@ -35,6 +36,10 @@ export interface SmsSendJob {
   phoneE164: string;
   body: string;
   auditEmailId?: string;
+}
+
+export interface PushSendJob {
+  emailId: string;
 }
 
 // Creates a Redis connection suitable for BullMQ producers and workers.
@@ -67,6 +72,11 @@ export function createUnreadEmailSmsQueue(connection: Redis): Queue<UnreadEmailS
 // Creates the SMS delivery queue with retry policy.
 export function createSmsQueue(connection: Redis): Queue<SmsSendJob> {
   return new Queue<SmsSendJob>(QUEUE_NAMES.smsSend, { connection, defaultJobOptions: { attempts: 3, backoff: { type: 'fixed', delay: 10000 }, removeOnComplete: 1000, removeOnFail: 5000 } });
+}
+
+// Creates the durable push queue for newly accepted mail.
+export function createPushQueue(connection: Redis): Queue<PushSendJob> {
+  return new Queue<PushSendJob>(QUEUE_NAMES.pushSend, { connection, defaultJobOptions: { attempts: 3, backoff: { type: 'fixed', delay: 10000 }, removeOnComplete: 1000, removeOnFail: 5000 } });
 }
 
 // Queues one idempotent SMS to the sender after a confirmed voice-email attempt fails.

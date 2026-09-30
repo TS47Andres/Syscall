@@ -23,7 +23,7 @@ import { audit, cancelScheduledEmail, createSession, ensureUserForPhone, hashPas
 
 const voiceEmailDraftTtlSeconds = 15 * 60;
 const inboundOtpPerCallAttempts = 3;
-const inboundOtpDailySendLimit = 5;
+const inboundOtpDailySendLimit = 100;
 
 // Builds the Fastify application with all shared dependencies explicitly provided.
 export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: FastifyInstance; context: ServiceContext }> {
@@ -516,7 +516,23 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     const context = JSON.parse(call) as { direction?: string; verified?: boolean; purpose?: string; displayName?: string; setupPhase?: string };
     if ((ticketData.direction ?? 'outbound') !== (context.direction ?? 'outbound')) throw httpError(401, 'Voice stream direction did not match the call.');
     if (context.direction === 'inbound' && context.verified !== true) throw httpError(401, 'Inbound caller has not passed phone verification.');
-    return { status: 'active', direction: context.direction ?? 'outbound', verified: context.verified ?? true, purpose: context.purpose ?? ticketData.purpose ?? 'general', displayName: context.displayName ?? ticketData.displayName ?? '', setupPhase: context.setupPhase ?? '' };
+    const verified = context.verified === true;
+    const account = verified
+      ? await User.findOne({ phoneE164, accountStatus: 'active' }).select({ displayName: 1, emailAddress: 1, passwordConfigured: 1 }).lean()
+      : null;
+    return {
+      status: 'active',
+      direction: context.direction ?? 'outbound',
+      verified,
+      purpose: context.purpose ?? ticketData.purpose ?? 'general',
+      displayName: context.displayName ?? ticketData.displayName ?? '',
+      setupPhase: context.setupPhase ?? '',
+      ...(verified ? {
+        accountSummary: account
+          ? { status: 'active', displayName: account.displayName, emailAddress: account.emailAddress, passwordConfigured: account.passwordConfigured }
+          : { status: 'not_found' },
+      } : {}),
+    };
   });
 
   // Returns an authoritative clock and timezone only for a live authenticated voice call.
@@ -535,7 +551,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
   // Executes narrow account, mail, and call-control actions for a verified voice call.
   app.post('/internal/voice/actions', async (request) => {
     requireVoiceAgent(request);
-    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['set_account_name', 'confirm_account_name', 'authorize_account_create', 'create_account', 'request_password_reset', 'end_call', 'prepare_email', 'prepare_scheduled_email', 'send_email', 'schedule_email', 'discard_email', 'list_scheduled_emails', 'cancel_scheduled_email', 'reschedule_scheduled_email']), displayName: z.string().trim().min(2).max(100).optional(), recipientPhone: phone10Schema.optional(), subject: z.string().max(998).optional(), textBody: z.string().max(12000).optional(), draftId: z.string().uuid().optional(), emailId: z.string().optional(), scheduledAt: z.string().optional(), delaySeconds: z.number().int().optional() }).parse(request.body);
+    const body = z.object({ callControlId: z.string().min(10), actionId: z.string().min(12).max(80), action: z.enum(['get_account_summary', 'set_account_name', 'confirm_account_name', 'authorize_account_create', 'create_account', 'request_password_reset', 'end_call', 'prepare_email', 'prepare_scheduled_email', 'send_email', 'schedule_email', 'discard_email', 'list_scheduled_emails', 'cancel_scheduled_email', 'reschedule_scheduled_email']), displayName: z.string().trim().min(2).max(100).optional(), recipientPhone: phone10Schema.optional(), subject: z.string().max(998).optional(), textBody: z.string().max(12000).optional(), draftId: z.string().uuid().optional(), emailId: z.string().optional(), scheduledAt: z.string().optional(), delaySeconds: z.number().int().optional() }).parse(request.body);
     const call = await redis.get(`voice:call:${body.callControlId}`);
     if (!call) throw httpError(401, 'Voice call is not active.');
     const callContext = JSON.parse(call) as { phoneE164: string; direction?: string; verified?: boolean; purpose?: string; displayName?: string; setupPhase?: string; confirmedName?: string };
@@ -550,7 +566,13 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     }
     try {
       let result: Record<string, unknown> = { action: body.action, status: 'not_allowed' };
-      if (body.action === 'set_account_name') {
+      if (body.action === 'get_account_summary') {
+        if (callContext.verified !== true) throw httpError(403, 'Verify the caller before looking up account details.');
+        const account = await User.findOne({ phoneE164, accountStatus: 'active' }).select({ displayName: 1, emailAddress: 1, passwordConfigured: 1 }).lean();
+        result = account
+          ? { action: body.action, status: 'active', account: { status: 'active', displayName: account.displayName, emailAddress: account.emailAddress, passwordConfigured: account.passwordConfigured } }
+          : { action: body.action, status: 'not_found' };
+      } else if (body.action === 'set_account_name') {
         if (callContext.purpose !== 'account_setup' || !['collect_name', 'confirm_name'].includes(callContext.setupPhase ?? '') || !body.displayName) throw httpError(409, 'A new account name is not expected for this call.');
         callContext.displayName = body.displayName;
         callContext.setupPhase = 'confirm_name';
@@ -576,15 +598,21 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
       } else if (body.action === 'create_account') {
         if (callContext.purpose !== 'account_setup' || !['confirm_create', 'completed'].includes(callContext.setupPhase ?? '') || !callContext.confirmedName) throw httpError(409, 'The caller name and account-creation consent must be confirmed before account creation.');
         const created = await ensureUserForPhone(config, phoneE164, callContext.confirmedName);
-        if (!created.created && created.user.accountStatus !== 'active') throw httpError(409, 'This account is currently unavailable.');
-        callContext.setupPhase = 'completed';
+        if (!created.created && created.user.accountStatus !== 'active') {
+          callContext.setupPhase = 'existing_account';
+          result = { action: body.action, status: 'already_exists_unavailable', created: false };
+        } else {
+          callContext.setupPhase = created.created ? 'completed' : 'existing_account';
+          result = created.created
+            ? { action: body.action, status: 'created', created: true, emailAddress: created.user.emailAddress, displayName: created.user.displayName }
+            : { action: body.action, status: 'already_exists', created: false, emailAddress: created.user.emailAddress, displayName: created.user.displayName };
+        }
         await redis.set(`voice:call:${body.callControlId}`, JSON.stringify(callContext), 'EX', 21600);
         await audit('voice_account_creation_attempt', created.user._id, [], { created: created.created });
         if (created.created) {
           await audit('account_created', created.user._id, [created.user.publicId]);
           await queueSms(context, { phoneE164: created.user.phoneE164, body: `Your Syscall account ${created.user.emailAddress} has been created.` });
         }
-        result = { action: body.action, created: created.created, emailAddress: created.user.emailAddress, displayName: created.user.displayName };
       } else if (body.action === 'request_password_reset') {
         await requestPasswordReset(context, phoneE164);
         result = { action: body.action, accepted: true };
@@ -1043,7 +1071,7 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
       await answerInboundCall(config, callControlId);
       const gatherId = crypto.randomUUID();
       await redis.set(`voice:otp-gather:${callControlId}`, gatherId, 'EX', otpTtlSeconds);
-      await gatherOtpDigits(config, callControlId, gatherId, 'To verify your phone number, enter the six-digit code we just texted you, then press pound.');
+      await gatherOtpDigits(config, callControlId, gatherId, 'To verify your phone number, enter the six-digit code we just texted you.');
       logger.info({ callControlId }, 'Started inbound phone verification');
     } catch (error) {
       await redis.del(callKey, otpKey, `voice:otp-gather:${callControlId}`, cooldownKey);
@@ -1071,19 +1099,26 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
     const otpKey = `voice:otp:${callControlId}`;
     const otpValue = await redis.get(otpKey);
     const gatheredDigits = typeof payload.digits === 'string' ? payload.digits : '';
-    const otp = gatheredDigits.endsWith('#') ? gatheredDigits.slice(0, -1) : '';
+    const otp = gatheredDigits;
+    const hasSixDigits = /^\d{6}$/.test(gatheredDigits);
     const stored = otpValue ? JSON.parse(otpValue) as { hash: string; expiresAt: number } : null;
-    const isValid = Boolean(payload.status === 'valid' && stored && stored.expiresAt >= Date.now() && /^\d{6}#$/.test(gatheredDigits) && hashSecret(`${callControlId}:${otp}`) === stored.hash);
+    const isValid = Boolean(payload.status === 'valid' && stored && stored.expiresAt >= Date.now() && hasSixDigits && hashSecret(`${callControlId}:${otp}`) === stored.hash);
     await redis.del(`voice:otp-gather:${callControlId}`);
     if (!isValid) {
       const attempts = callContext.otpAttempts + 1;
       const dailyFailedKey = `otp:failed:${callContext.phoneE164}:${new Date().toISOString().slice(0, 10)}`;
-      const dailyFailures = await redis.incr(dailyFailedKey);
-      if (dailyFailures === 1) await redis.expire(dailyFailedKey, 24 * 60 * 60);
-      if (attempts >= inboundOtpPerCallAttempts || dailyFailures >= config.OTP_MAX_FAILED_ATTEMPTS_PER_DAY || !stored || stored.expiresAt < Date.now()) {
+      let dailyFailures = Number(await redis.get(dailyFailedKey) ?? 0);
+      if (hasSixDigits) {
+        dailyFailures = await redis.incr(dailyFailedKey);
+        if (dailyFailures === 1) await redis.expire(dailyFailedKey, 24 * 60 * 60);
+      }
+      const expired = !stored || stored.expiresAt < Date.now();
+      const terminal = attempts >= inboundOtpPerCallAttempts || (hasSixDigits && dailyFailures >= config.OTP_MAX_FAILED_ATTEMPTS_PER_DAY) || expired;
+      logger.info({ callControlId, digitCount: gatheredDigits.length, gatherStatus: payload.status ?? 'unknown', completeCodeEntered: hasSixDigits, attempts, dailyFailures }, hasSixDigits ? 'Inbound OTP entry was not accepted' : 'Inbound OTP input was incomplete');
+      if (terminal) {
         await redis.del(callKey, otpKey);
         await hangupCall(config, callControlId).catch(() => undefined);
-        logger.info({ callControlId }, 'Inbound phone verification ended after an invalid or expired code');
+        logger.info({ callControlId, completeCodeEntered: hasSixDigits, attempts, dailyFailures, expired }, 'Inbound phone verification ended after failed or expired OTP input');
         return;
       }
       callContext.otpAttempts = attempts;
@@ -1091,7 +1126,10 @@ export async function buildApp(config: AppConfig, redis: Redis): Promise<{ app: 
       await redis.set(callKey, JSON.stringify(callContext), 'EX', Math.max(1, Math.ceil((stored.expiresAt - Date.now()) / 1000)));
       await redis.set(`voice:otp-gather:${callControlId}`, nextGatherId, 'EX', Math.max(1, Math.ceil((stored.expiresAt - Date.now()) / 1000)));
       try {
-        await gatherOtpDigits(config, callControlId, nextGatherId, 'That code was not accepted. Please enter the six-digit code from your text message, then press pound.');
+        const retryPrompt = hasSixDigits
+          ? 'That code was not accepted. Please enter the six-digit code from your text message.'
+          : 'I only received part of the code. Please enter all six digits now.';
+        await gatherOtpDigits(config, callControlId, nextGatherId, retryPrompt);
       } catch (error) {
         await redis.del(callKey, otpKey, `voice:otp-gather:${callControlId}`);
         await hangupCall(config, callControlId).catch(() => undefined);

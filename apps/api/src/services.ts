@@ -41,8 +41,17 @@ export async function ensureUserForPhone(config: AppConfig, phone: string, displ
   const phone10Digit = toPhone10(phoneE164);
   const existing = await User.findOne({ phoneE164 });
   if (existing) return { user: existing, created: false };
-  const user = await User.create({ phoneE164, phone10Digit, emailAddress: toLocalAddress(phone10Digit, config.LOCAL_MAIL_DOMAIN), displayName: displayName?.trim() ?? '', passwordHash: null, passwordConfigured: false });
-  return { user, created: true };
+  try {
+    const user = await User.create({ phoneE164, phone10Digit, emailAddress: toLocalAddress(phone10Digit, config.LOCAL_MAIL_DOMAIN), displayName: displayName?.trim() ?? '', passwordHash: null, passwordConfigured: false });
+    return { user, created: true };
+  } catch (error) {
+    // The unique phone indexes arbitrate simultaneous signup attempts for one number.
+    if ((error as { code?: number }).code === 11000) {
+      const racedUser = await User.findOne({ phoneE164 });
+      if (racedUser) return { user: racedUser, created: false };
+    }
+    throw error;
+  }
 }
 
 // Sends password reset instructions without revealing account existence to a caller.

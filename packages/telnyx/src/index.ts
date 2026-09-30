@@ -50,7 +50,7 @@ export async function startCallStreaming(config: AppConfig, callControlId: strin
   return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/streaming_start`, { command_id: crypto.randomUUID(), ...streamOptions(streamUrl) });
 }
 
-// Speaks the OTP prompt and collects six keypad digits followed by #.
+// Speaks the OTP prompt and submits automatically after six keypad digits.
 export async function gatherOtpDigits(config: AppConfig, callControlId: string, gatherId: string, prompt: string): Promise<Record<string, unknown>> {
   return telnyxRequest(config, `/calls/${encodeURIComponent(callControlId)}/actions/gather_using_speak`, {
     command_id: crypto.randomUUID(),
@@ -60,12 +60,11 @@ export async function gatherOtpDigits(config: AppConfig, callControlId: string, 
     voice: 'Telnyx.NaturalHD.astra',
     language: 'en-IN',
     service_level: 'premium',
-    minimum_digits: 7,
-    maximum_digits: 7,
-    terminating_digit: '',
-    valid_digits: '0123456789#',
+    minimum_digits: 6,
+    maximum_digits: 6,
+    valid_digits: '0123456789',
     maximum_tries: 1,
-    inter_digit_timeout_millis: 15000,
+    inter_digit_timeout_millis: 30000,
     timeout_millis: 60000,
   });
 }

@@ -45,11 +45,20 @@ interface PendingVoiceEmail {
   scheduledAt?: string;
 }
 
+interface VerifiedAccountSummary {
+  status: 'active' | 'not_found';
+  displayName?: string;
+  emailAddress?: string;
+  passwordConfigured?: boolean;
+}
+
 interface CallSession {
   socket: WebSocket;
   ticket: string;
   expectedPhoneE164: string;
   expectedDirection: 'inbound' | 'outbound';
+  verified: boolean;
+  accountSummary?: VerifiedAccountSummary;
   callControlId?: string;
   stt?: WebSocket;
   pendingAudio: string[];
@@ -70,7 +79,7 @@ interface CallSession {
   ticketReady: Promise<void>;
   apiSessionClosed: boolean;
   accountSetupName?: string;
-  accountSetupPhase?: 'collect_name' | 'confirm_name' | 'awaiting_create_prompt' | 'confirm_create' | 'completed';
+  accountSetupPhase?: 'collect_name' | 'confirm_name' | 'awaiting_create_prompt' | 'confirm_create' | 'existing_account' | 'completed';
 }
 
 // Hashes stream tickets so only the one-time verifier, never the raw token, is stored in Redis.
@@ -192,7 +201,7 @@ async function speak(session: CallSession, text: string, language: VoiceLanguage
 }
 
 // Defines business actions and exposes call termination only while answering the explicit check-in.
-function formatToolDefinitions(canConfirmEmail: boolean, pendingEmail: PendingVoiceEmail | undefined, canEndCall: boolean, accountSetupPhase?: CallSession['accountSetupPhase']): unknown[] {
+function formatToolDefinitions(canConfirmEmail: boolean, pendingEmail: PendingVoiceEmail | undefined, canEndCall: boolean, accountSetupPhase?: CallSession['accountSetupPhase'], verified = false): unknown[] {
   const tools: unknown[] = [
     { type: 'function', function: { name: 'request_password_reset', description: 'Send generic password reset instructions by SMS when the caller asks to reset or recover their password. Never reveal whether an account exists.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
     { type: 'function', function: { name: 'prepare_email', description: 'Prepare or revise a plain-text email only after the caller has supplied the recipient’s ten-digit Indian mobile number, subject, and complete message. Do not require or pass an email-domain suffix. If the caller says a complete Syscall address, extract only its ten-digit phone number. This never sends the email. Include the complete accumulated message body, preserving the caller’s requested wording and edits.', parameters: { type: 'object', properties: { recipientPhone: { type: 'string', pattern: '^[6-9][0-9]{9}$', description: 'The recipient’s ten-digit Indian mobile number only.' }, subject: { type: 'string', maxLength: 998 }, textBody: { type: 'string', maxLength: 12000 } }, required: ['recipientPhone', 'subject', 'textBody'], additionalProperties: false } } },
@@ -202,9 +211,10 @@ function formatToolDefinitions(canConfirmEmail: boolean, pendingEmail: PendingVo
     { type: 'function', function: { name: 'reschedule_scheduled_email', description: 'Change a pending email schedule when the caller clearly asks. Use an emailId from list_scheduled_emails and exactly one new time: delaySeconds for a relative time or scheduledAt as RFC3339 with +05:30.', parameters: { type: 'object', properties: { emailId: { type: 'string' }, delaySeconds: { type: 'integer', minimum: 60, maximum: 31536000 }, scheduledAt: { type: 'string', format: 'date-time' } }, required: ['emailId'], additionalProperties: false } } },
     { type: 'function', function: { name: 'offer_more_help', description: 'Call only after the current request has been fully answered or completed. The application will ask the caller whether they need any other help; this tool does not end the call.', parameters: { type: 'object', properties: {}, additionalProperties: false } } },
   ];
+  if (verified) tools.unshift({ type: 'function', function: { name: 'get_account_summary', description: 'Look up current facts about the verified caller’s own Syscall account when they ask about their account name, Syscall email address, or whether a password is configured. Use the result as the source of truth; never guess.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
   if (accountSetupPhase === 'collect_name' || accountSetupPhase === 'confirm_name') tools.unshift({ type: 'function', function: { name: 'set_account_name', description: accountSetupPhase === 'collect_name' ? 'Save the name the caller just gave for their new Syscall account. Call only after they have provided a name; the application will read it back for confirmation.' : 'Save a corrected account name the caller just provided. Do not treat a correction as confirmation; read the corrected name back and wait for explicit confirmation.', parameters: { type: 'object', properties: { displayName: { type: 'string', minLength: 2, maxLength: 100 } }, required: ['displayName'], additionalProperties: false } } });
   if (accountSetupPhase === 'confirm_name') tools.unshift({ type: 'function', function: { name: 'confirm_account_name', description: 'Call only after the caller explicitly confirms the name you just read back. If corrected, read the corrected name back and wait for confirmation. Never create the account in this step.', parameters: { type: 'object', properties: { displayName: { type: 'string', minLength: 2, maxLength: 100 } }, required: ['displayName'], additionalProperties: false } } });
-  if (accountSetupPhase === 'confirm_create') tools.unshift({ type: 'function', function: { name: 'create_account', description: 'Create the account only after you have just asked whether to create it and the caller gives a clear affirmative confirmation in their own language. Do not call for an initial request, a name confirmation, or an ambiguous answer.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
+  if (accountSetupPhase === 'confirm_create') tools.unshift({ type: 'function', function: { name: 'create_account', description: 'Create the single Syscall account allowed for this verified phone number only after you have just asked whether to create it and the caller gives a clear affirmative confirmation in their own language. Never create or promise a second account for the same phone number. Do not call for an initial request, a name confirmation, or an ambiguous answer.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
   if (canConfirmEmail && pendingEmail?.scheduledAt) tools.splice(7, 0, { type: 'function', function: { name: 'schedule_confirmed_email', description: 'Schedule the staged email only after an unambiguous affirmative confirmation to the immediately preceding application question about its recipient, content, and exact IST time.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
   else if (canConfirmEmail && pendingEmail) tools.splice(7, 0, { type: 'function', function: { name: 'send_confirmed_email', description: 'Send the staged immediate email only after an unambiguous affirmative confirmation to the immediately preceding application question. Never infer confirmation from an earlier turn.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
   if (pendingEmail) tools.splice(tools.length - 1, 0, { type: 'function', function: { name: 'discard_email_draft', description: 'Discard the currently staged email only when the caller clearly asks to cancel or discard it. This never sends or schedules the email.', parameters: { type: 'object', properties: {}, additionalProperties: false } } });
@@ -396,7 +406,7 @@ async function modelResponse(session: CallSession, language: VoiceLanguage, sign
     content: `You are Syscall's friendly conversational phone assistant, not an IVR. For this response, speak in ${language.name}, the language detected for the caller's latest utterance, using its normal script.${languageScript} Language is selected independently for every caller turn and may change at any time; do not cling to a language used earlier in the call. Never claim that you can only speak or assist in English; respond to the latest utterance in ${language.name}. Keep answers concise and natural for a phone conversation. Help with Syscall account creation, password reset, writing plain-text email, and scheduling email to an active Syscall account. When the caller clearly asks to create/sign up for an account, call create_account immediately; do not ask for confirmation, offer keypad options, or start a menu. When the caller asks for password reset/recovery, call request_password_reset immediately. ${timeContext} ${emailDraftInstruction} A prepared email may only be sent or scheduled after the application has read back its destination, message summary, and (for scheduling) exact IST time, then asked for confirmation; act only on a clear affirmative answer on the next turn. Never send or schedule merely because the caller initially asked. ${schedulingInstruction} Ask a brief clarifying question only if the caller's intent or time is genuinely ambiguous. ${turnInstruction} If a confirmed immediate send fails, explain the technical failure and only say an SMS notice was queued if failureNotificationQueued is true. If a schedule is accepted, say it is scheduled for the returned IST time; do not claim it has already been sent. Never claim an operation succeeded unless a tool result confirms it. Never ask for a password, OTP, payment details, or other secrets. Explain outcomes naturally in ${language.name}. Never mention IVR, keypad options, or internal tools.`,
   };
   // Removes a legacy instruction that bypassed the explicitly confirmed signup state machine.
-  system.content = String(system.content).replace('When the caller clearly asks to create/sign up for an account, call create_account immediately; do not ask for confirmation, offer keypad options, or start a menu.', 'Account creation is limited to the explicitly confirmed onboarding flow described in the following instruction.');
+  system.content = String(system.content).replace('When the caller clearly asks to create/sign up for an account, call create_account immediately; do not ask for confirmation, offer keypad options, or start a menu.', 'A phone number can have only one Syscall account. Never promise or attempt a second account for the same number. Account creation is limited to the explicitly confirmed onboarding flow described in the following instruction.');
   const accountSetupMessage: ChatMessage = {
     role: 'system',
     content: session.accountSetupPhase === 'collect_name'
@@ -407,15 +417,21 @@ async function modelResponse(session: CallSession, language: VoiceLanguage, sign
         ? 'These onboarding rules override generic account-creation instructions. The caller confirmed their name. Ask them clearly whether you should create their Syscall account now. Do not create it in this response; wait for their next turn.'
         : session.accountSetupPhase === 'confirm_create'
           ? 'These onboarding rules override generic account-creation instructions. The caller confirmed their name and you have just asked whether to create their account. Call create_account only after an unambiguous affirmative answer to that question; for a no or uncertainty, do not create.'
-        : session.accountSetupPhase === 'completed'
-          ? 'This account setup call has already created the account; do not create another.'
+        : session.accountSetupPhase === 'existing_account'
+          ? 'A Syscall account record already exists for this phone number. Only one account is allowed per phone number. Do not call create_account again or suggest a second account. Explain that this number is already associated with an account; help with access or recovery when the account is active, and suggest contacting support if it is unavailable.'
+          : session.accountSetupPhase === 'completed'
+            ? 'This account setup call has already created the single account allowed for this phone number; do not create another.'
           : 'Do not offer browser account creation on an ordinary call.'
   };
-  const tools = formatToolDefinitions(canConfirmEmail && !emailPreparedThisTurn, session.pendingEmail, canEndCall, session.accountSetupPhase);
+  const accountContext: ChatMessage | undefined = session.verified
+    ? { role: 'system', content: `Verified caller account context from the application. Treat this as the only factual source about the caller’s account; do not infer missing values. If the caller asks for account details not listed here, call get_account_summary. ${JSON.stringify(session.accountSummary ?? { status: 'not_found' })}` }
+    : undefined;
+  const tools = formatToolDefinitions(canConfirmEmail && !emailPreparedThisTurn, session.pendingEmail, canEndCall, session.accountSetupPhase, session.verified);
   const requestBody: Record<string, unknown> = {
     model: 'sarvam-105b-conversations',
     messages: [
       system,
+      ...(accountContext ? [accountContext] : []),
       ...(session.accountSetupPhase ? [accountSetupMessage] : []),
       ...(session.pendingEmail ? [{
         role: 'system',
@@ -445,6 +461,12 @@ async function modelResponse(session: CallSession, language: VoiceLanguage, sign
 
 // Executes allowlisted account, mail, and call-control actions using this live call's identity.
 async function executeTool(session: CallSession, name: string, argumentsValue: Record<string, unknown>, canConfirmEmail: boolean): Promise<Record<string, unknown>> {
+  if (name === 'get_account_summary' && session.verified && session.callControlId) {
+    const result = await callApi('/internal/voice/actions', { callControlId: session.callControlId, actionId: crypto.randomUUID(), action: 'get_account_summary' });
+    if (result.status === 'active' && typeof result.account === 'object' && result.account) session.accountSummary = result.account as VerifiedAccountSummary;
+    else if (result.status === 'not_found') session.accountSummary = { status: 'not_found' };
+    return result;
+  }
   if (name === 'set_account_name' && session.callControlId && ['collect_name', 'confirm_name'].includes(session.accountSetupPhase ?? '') && typeof argumentsValue.displayName === 'string') {
     const displayName = argumentsValue.displayName.trim();
     const result = await callApi('/internal/voice/actions', { callControlId: session.callControlId, actionId: crypto.randomUUID(), action: 'set_account_name', displayName });
@@ -462,7 +484,18 @@ async function executeTool(session: CallSession, name: string, argumentsValue: R
   if (name === 'create_account' && session.callControlId) {
     if (session.accountSetupPhase !== 'confirm_create') return { status: 'not_allowed' };
     const result = await callApi('/internal/voice/actions', { callControlId: session.callControlId, actionId: crypto.randomUUID(), action: 'create_account' });
-    if (result.action === 'create_account') session.accountSetupPhase = 'completed';
+    if (result.status === 'already_exists' || result.status === 'already_exists_unavailable') session.accountSetupPhase = 'existing_account';
+    if (result.action === 'create_account') {
+      if (result.created === true) session.accountSetupPhase = 'completed';
+      if (typeof result.emailAddress === 'string' && typeof result.displayName === 'string') {
+        session.accountSummary = {
+          status: 'active',
+          displayName: result.displayName,
+          emailAddress: result.emailAddress,
+          ...(result.created === true ? { passwordConfigured: false } : {}),
+        };
+      }
+    }
     return result;
   }
   if (name === 'request_password_reset' && session.callControlId) {
@@ -743,6 +776,8 @@ async function activateSession(session: CallSession, event: TelnyxEnvelope): Pro
   const activation = await callApi('/internal/voice/sessions/activate', { ticket: session.ticket, callControlId, phone });
   session.ticket = '';
   session.callControlId = callControlId;
+  session.verified = activation.verified === true;
+  if (activation.accountSummary && typeof activation.accountSummary === 'object') session.accountSummary = activation.accountSummary as VerifiedAccountSummary;
   if (activation.setupPhase === 'collect_name') session.accountSetupPhase = 'collect_name';
   if (activation.purpose === 'account_setup') {
     session.accountSetupName = String(activation.displayName ?? '');
@@ -798,6 +833,7 @@ websocketServer.on('connection', (socket, request) => {
     ticket,
     expectedPhoneE164: '',
     expectedDirection: 'outbound',
+    verified: false,
     pendingAudio: [],
     history: [],
     awaitingEndConfirmation: false,

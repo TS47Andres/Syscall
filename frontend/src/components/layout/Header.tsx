@@ -4,7 +4,6 @@ import {
   IconMenu,
   IconSearch,
   IconClose,
-  IconSarvamAI,
   IconSliders,
 } from '../Icons';
 import { SearchFilterDropdown } from '../mail/SearchFilterDropdown';
@@ -187,22 +186,12 @@ export const Header: React.FC<HeaderProps> = ({
         />
       </div>}
 
-      {/* Right: Current Time + Sarvam AI Logo + Profile Avatar */}
+      {/* Right: Current Time + Profile Avatar */}
       <div style={styles.rightArea} className={`gmail-header-right ${isFilterOpen ? 'hide-on-mobile-filter' : ''}`}>
         {/* Current Time Display (Day, date and time hh:mm 24-hour format, No bg) */}
         <div style={styles.headerTimeText} className="desktop-only" title="Current Time (24-hour format)">
           {headerTime}
         </div>
-
-        {/* Sarvam AI Logo / Launcher (Pure zoom on hover, transparent bg, no blue hue/border) */}
-        <button
-          style={styles.sarvamAiBtn}
-          className="sarvam-ai-btn desktop-only"
-          title="Sarvam AI Agent (Coming soon)"
-          aria-label="Sarvam AI Agent"
-        >
-          <IconSarvamAI size={22} />
-        </button>
 
         {/* Profile Avatar Button */}
         <button
@@ -362,21 +351,6 @@ const styles: Record<string, React.CSSProperties> = {
     userSelect: 'none',
     background: 'none',
     padding: '0 4px',
-  },
-  sarvamAiBtn: {
-    width: '36px',
-    height: '36px',
-    borderRadius: '50%',
-    backgroundColor: 'transparent',
-    border: 'none',
-    boxShadow: 'none',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    flexShrink: 0,
-    padding: 0,
-    outline: 'none',
   },
   avatarBtn: {
     width: '36px',

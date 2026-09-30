@@ -25,6 +25,8 @@ Syscall gives each active account a local mail address derived from its verified
 
 - [Highlights](#highlights)
 - [Feature gallery](#feature-gallery)
+- [Mobile app screenshots](#mobile-app-screenshots)
+- [Mobile app development](#mobile-app-development)
 - [How it fits together](#how-it-fits-together)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
@@ -77,6 +79,59 @@ These are the feature images displayed in the sign in page carousel.
     </td>
   </tr>
 </table>
+
+## Mobile app screenshots
+
+The native Expo app uses React Native views and calls the Syscall API directly; it does not load the web app in a WebView. These Android screenshots were captured in Expo Go. The mailbox-loading image shows the brief transition while opening a signed-in mailbox.
+
+| Screen | Preview |
+| --- | --- |
+| Sign in | <img src="mobile-frontend/docs/screenshots/sign-in.jpg" alt="Syscall mobile sign-in screen" width="220" /> |
+| Mailbox loading | <img src="mobile-frontend/docs/screenshots/mailbox-loading.jpg" alt="Mailbox loading screen" width="220" /> |
+| Compose message | <img src="mobile-frontend/docs/screenshots/compose-message.jpg" alt="Compose message screen" width="220" /> |
+| Profile: personal information | <img src="mobile-frontend/docs/screenshots/profile-personal-information.jpg" alt="Profile personal information screen" width="220" /> |
+| Profile: address and settings | <img src="mobile-frontend/docs/screenshots/profile-address-and-settings.jpg" alt="Profile address and settings screen" width="220" /> |
+| Mailbox navigation | <img src="mobile-frontend/docs/screenshots/mailbox-navigation.jpg" alt="Mailbox navigation drawer" width="220" /> |
+| Message with attachments | <img src="mobile-frontend/docs/screenshots/message-with-attachments.jpg" alt="Message with attachments" width="220" /> |
+| Sent mailbox | <img src="mobile-frontend/docs/screenshots/sent-mailbox.jpg" alt="Sent mailbox screen" width="220" /> |
+| Message reader | <img src="mobile-frontend/docs/screenshots/message-reader.jpg" alt="Message reader screen" width="220" /> |
+| Search filters | <img src="mobile-frontend/docs/screenshots/search-filters.jpg" alt="Search filters screen" width="220" /> |
+
+## Mobile app development
+
+### Run with Expo Go
+
+Set `EXPO_PUBLIC_API_URL` in `mobile-frontend/.env` to an API URL the phone can reach. For a physical phone, use the development computer's LAN IP and keep both devices on the same network. The API uses port `3000` by default. Start the API, then run:
+
+```powershell
+cd mobile-frontend
+npm run start:go
+```
+
+Scan the Metro QR code with Expo Go on Android or iOS.
+
+### Remote push notifications
+
+Remote push delivery requires a development build; Expo Go cannot test remote push on Android from SDK 53 onward. Notification token registration and notification-open navigation are enabled in development and standalone builds.
+
+1. From `mobile-frontend/`, link the app to an EAS project with `npx eas-cli@latest init`.
+2. Set `EXPO_PUBLIC_EAS_PROJECT_ID` in `mobile-frontend/.env`.
+3. Configure Android FCM v1 credentials and the iOS APNs key in EAS.
+4. Build and install a development client:
+
+Run these commands from `mobile-frontend/`:
+
+```powershell
+npx eas-cli@latest build --profile development --platform android
+npx eas-cli@latest build --profile development --platform ios
+npm run start:dev-client
+```
+
+An Apple Developer account is required for iOS device push credentials.
+
+### API address
+
+`EXPO_PUBLIC_API_URL` is the API service root without a trailing slash. For an Android emulator use `http://10.0.2.2:3000`; for the iOS simulator use `http://localhost:3000`. Production builds should use a public HTTPS URL.
 
 ## How it fits together
 
@@ -281,6 +336,7 @@ Schedules can be listed at `GET /api/mail/scheduled`, moved with `PATCH /api/mai
 | Path | Responsibility |
 | --- | --- |
 | `frontend/` | React/Vite browser app, auth flow, mailbox, profile, compose UI. |
+| `mobile-frontend/` | Expo/React Native app, configuration, and mobile UI screenshots. |
 | `apps/api/` | Fastify API, authentication, mail orchestration, AI compose route, provider webhooks. |
 | `apps/voice-agent/` | Telnyx media stream and Sarvam-powered call assistant. |
 | `apps/smtp/` | Internal SMTP ingress, MIME parsing, attachment scanning, message storage. |
@@ -293,9 +349,7 @@ Schedules can be listed at `GET /api/mail/scheduled`, moved with `PATCH /api/mai
 ## More documentation
 
 - [Architecture and data flows](ARCHITECTURE.md)
-- [Frontend integration contract](FRONTEND_AGENT_SPEC.md)
 - [Environment template](.env.example)
-- [Frontend development notes](frontend/README.md)
 
 <p align="center">
   <sub>Topics: phone-based email · self-hosted mail · React · TypeScript · Fastify · MongoDB · Redis · Docker Compose · Telnyx · Sarvam AI · ClamAV</sub>

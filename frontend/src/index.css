@@ -869,35 +869,6 @@ input, textarea, select {
 }
 
 /* ==========================================================================
-   Sarvam AI Header Button (Pure Zoom on Hover, No Blue Hue/Border)
-   ========================================================================== */
-.sarvam-ai-btn {
-  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-.sarvam-ai-btn svg {
-  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.sarvam-ai-btn:hover {
-  transform: scale(1.25) !important;
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-
-.sarvam-ai-btn:hover svg {
-  transform: scale(1.12);
-}
-
-.sarvam-ai-btn:active {
-  transform: scale(1.05) !important;
-}
-
-/* ==========================================================================
    Hidden Scrollbars (Mail, Sidebar, Reading Pane)
    ========================================================================== */
 .gmail-sidebar-nav,

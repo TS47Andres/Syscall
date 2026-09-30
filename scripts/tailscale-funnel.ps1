@@ -36,7 +36,7 @@ try {
   $health = Invoke-WebRequest -UseBasicParsing -Uri $healthUrl -TimeoutSec 5
   if ($health.StatusCode -ne 200) { throw "API health check returned HTTP $($health.StatusCode)." }
 } catch {
-  throw "Syscall API is not healthy at $healthUrl. Start it with 'docker compose up -d --build' first. Details: $($_.Exception.Message)"
+  throw "Syscall API is not healthy at $healthUrl. Start the complete deployment with 'docker compose --profile voice up -d --build' first. Details: $($_.Exception.Message)"
 }
 
 try {
@@ -48,7 +48,7 @@ try {
 
 Write-Host "Publishing the API backend through Tailscale Funnel at https://<device>.ts.net -> http://127.0.0.1:$apiPort."
 Write-Host 'The API is publicly reachable through HTTPS on Funnel port 443; Tailscale forwards it to the local backend port.'
-Write-Host 'The host-side API port is loopback-only; MongoDB, Redis, SMTP, and ClamAV remain private.'
+Write-Host 'Docker Compose also publishes API_PORT on the host for local and mobile clients; host firewall rules control direct access. MongoDB, Redis, SMTP, and ClamAV remain private.'
 
 $apiArguments = @('--bg', '--https=443', '--set-path=/', '--yes', "http://127.0.0.1:$apiPort")
 & $tailscalePath funnel @apiArguments

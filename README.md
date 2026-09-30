@@ -17,9 +17,9 @@
   <img src="frontend/src/assets/showcase/Emailing.png" alt="Syscall inbox and phone-linked email" width="900" />
 </p>
 
-Syscall gives each active account a local mail address derived from its verified Indian mobile number, such as `9876543210@niti`. It combines a React mail client with an API, internal SMTP delivery, background workers, and an optional Telnyx voice assistant.
+Syscall gives each active account a local mail address derived from its verified Indian mobile number, such as `9876543210@niti`. It combines browser and mobile mail clients with an API, internal SMTP delivery, background workers, and a Telnyx voice assistant.
 
-> **Status:** Self-hosted development project. Telnyx and Sarvam powered features need provider credentials and webhook setup before they can be used. See [setup](#quick-start) and [provider setup](#provider-setup).
+> **Status:** Self-hosted development project. The complete deployment includes the voice agent. Telnyx calling and SMS require provider credentials and Tailscale Funnel setup; Sarvam features require an API key. See [Quick start](#quick-start) and [Provider setup](#provider-setup).
 
 ## Contents
 
@@ -40,13 +40,13 @@ Syscall gives each active account a local mail address derived from its verified
 
 ## Highlights
 
-- **Phone-addressed accounts:** a caller confirms their name over an onboarding call, and the account is created by the IVR flow.
+- **Phone-addressed accounts:** a caller confirms their name with the voice agent during an onboarding call, then gives explicit consent before the account is created.
 - **OTP and password access:** sign in with a password or a one-time code. New users can verify their mobile number and set an initial password from the sign in page.
 - **Mail essentials:** inbox, sent, all mail, categories, stars, spam, trash, replies, drafts, and attachments.
 - **Write with Sarvam:** describe a new email or ask for edits. The Sarvam 105B model receives the current subject and message as context and returns an updated subject and complete message body.
 - **Send later:** schedule delivery, then review, reschedule, or cancel messages while they are still pending.
 - **Attachment scanning:** the internal SMTP service checks incoming attachments with ClamAV before accepting a message.
-- **Voice assistant:** an optional multilingual assistant handles account setup and supported mail actions over Telnyx calls, with Sarvam speech services.
+- **Voice assistant:** the required multilingual voice agent handles account setup and supported mail actions over Telnyx calls, using Sarvam speech services.
 - **Self-hosted services:** Docker Compose runs the app and its data services together, with databases and SMTP kept off the public interface.
 
 ## Feature gallery
@@ -99,39 +99,57 @@ The native Expo app uses React Native views and calls the Syscall API directly; 
 
 ## Mobile app development
 
-### Run with Expo Go
+The mobile client is an Expo SDK 57 / React Native app. It connects directly to the API; unlike the browser app, it does not use the frontend Nginx proxy.
 
-Set `EXPO_PUBLIC_API_URL` in `mobile-frontend/.env` to an API URL the phone can reach. For a physical phone, use the development computer's LAN IP and keep both devices on the same network. The API uses port `3000` by default. Start the API, then run:
+### Configure the API address
+
+From the repository root, create the mobile environment file:
+
+```powershell
+Copy-Item mobile-frontend/.env.example mobile-frontend/.env
+```
+
+Edit `mobile-frontend/.env` and set `EXPO_PUBLIC_API_URL` to the API service root without a trailing slash. Replace the example LAN IP with the address that matches where the app is running. Restart Metro after changing this value:
+
+| App location | Example API URL |
+| --- | --- |
+| Physical phone on the same Wi-Fi as the development computer | `http://<computer-LAN-IP>:3000` |
+| Android emulator | `http://10.0.2.2:3000` |
+| iOS simulator | `http://localhost:3000` |
+| Phone outside the local network | The public HTTPS API hostname; this deployment uses the Tailscale Funnel hostname |
+
+Start the API first. For the normal local setup, use the [Quick start](#quick-start). The mobile app needs a reachable API; voice signup also requires the [required voice profile and Tailscale Funnel](#required-tailscale-funnel). Leave `EXPO_PUBLIC_EAS_PROJECT_ID` empty for basic Expo Go use.
+
+### Start the app in Expo Go
+
+Install Node.js 22 or newer and [Expo Go](https://expo.dev/go) on the Android or iOS device. From the repository root, install the mobile app's dependencies and start Expo:
 
 ```powershell
 cd mobile-frontend
-npm run start:go
+npm ci
+npx expo start
 ```
 
-Scan the Metro QR code with Expo Go on Android or iOS.
+Because this project includes `expo-dev-client`, plain `npx expo start` targets a development build by default. To launch in Expo Go, run `npx expo start --go`. Scan the QR code with Expo Go on Android; on iOS, scan it with the Camera app and open it in Expo Go. Keep the phone and development computer on the same Wi-Fi network when using the LAN API address.
+
+If the local network blocks Metro traffic, start Metro with `npx expo start --tunnel`. This Expo tunnel is for the development server; it is separate from the Tailscale Funnel that exposes the backend to Telnyx.
 
 ### Remote push notifications
 
-Remote push delivery requires a development build; Expo Go cannot test remote push on Android from SDK 53 onward. Notification token registration and notification-open navigation are enabled in development and standalone builds.
+Expo Go is suitable for checking the UI and API flows, but it does not support remote push notifications; test push delivery in a development build. See [Expo's push notification FAQ](https://docs.expo.dev/push-notifications/faq/). Set up EAS and push credentials before testing:
 
 1. From `mobile-frontend/`, link the app to an EAS project with `npx eas-cli@latest init`.
-2. Set `EXPO_PUBLIC_EAS_PROJECT_ID` in `mobile-frontend/.env`.
-3. Configure Android FCM v1 credentials and the iOS APNs key in EAS.
-4. Build and install a development client:
-
-Run these commands from `mobile-frontend/`:
+2. Put the project ID in `EXPO_PUBLIC_EAS_PROJECT_ID` in `mobile-frontend/.env`.
+3. Configure Android FCM v1 credentials and the iOS APNs key in EAS. An Apple Developer account is required for iOS push credentials.
+4. Build and install a development client, then start the dev-client server from `mobile-frontend/`:
 
 ```powershell
 npx eas-cli@latest build --profile development --platform android
 npx eas-cli@latest build --profile development --platform ios
-npm run start:dev-client
+npx expo start --dev-client
 ```
 
-An Apple Developer account is required for iOS device push credentials.
-
-### API address
-
-`EXPO_PUBLIC_API_URL` is the API service root without a trailing slash. For an Android emulator use `http://10.0.2.2:3000`; for the iOS simulator use `http://localhost:3000`. Production builds should use a public HTTPS URL.
+For details, see [Expo's development server guide](https://docs.expo.dev/get-started/start-developing/) and [push notification setup](https://docs.expo.dev/push-notifications/push-notifications-setup/).
 
 ## How it fits together
 
@@ -149,7 +167,7 @@ flowchart LR
   SMTP --> Mongo
   SMTP --> Files[(Mail storage volume)]
   Telnyx -->|webhooks| API
-  Telnyx <-->|voice media WebSocket| Voice[Optional voice agent]
+  Telnyx <-->|voice media WebSocket| Voice[Voice agent]
   Voice -->|speech, language, and conversation| Sarvam
   Voice -->|authenticated call actions| API
 ```
@@ -166,22 +184,25 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for service responsibilities, request flo
 - Git
 - Node.js 22 or newer for local development outside Docker
 
-### Start the core stack
+### Start the complete stack
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up -d --build
 ```
 
-The frontend is available at [http://localhost:8080](http://localhost:8080). Change `FRONTEND_PORT` in `.env` if that port is already in use.
+Before starting, set `SARVAM_API_KEY` and a `VOICE_AGENT_API_TOKEN` of at least 32 characters in `.env`. Generate a token with Node.js:
 
-The default profile starts MongoDB, Redis, ClamAV, the API, internal SMTP, the mail worker, and the browser frontend. The voice agent is optional:
+```powershell
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Start the complete deployment, including the required voice agent. Compose gates that service behind the named `voice` profile, so include the profile:
 
 ```powershell
 docker compose --profile voice up -d --build
 ```
 
-Core services can start with provider settings left blank, but phone calls, SMS, email-writing assistance, and voice AI need the corresponding configuration. See [Provider setup](#provider-setup). Do not put real credentials in source control.
+The browser frontend is available at [http://localhost:8080](http://localhost:8080). Change `FRONTEND_PORT` in `.env` if that port is already in use. Telnyx calling and SMS also require provider values and Funnel setup in [Provider setup](#provider-setup). Do not put real credentials in source control.
 
 ### Stop the stack
 
@@ -205,8 +226,8 @@ Start from [.env.example](.env.example). Docker Compose provides internal host n
 | `TELNYX_PHONE_NUMBER`, `TELNYX_CONNECTION_ID` | Outbound voice calling configuration. |
 | `TELNYX_MESSAGING_PROFILE_ID`, `TELNYX_MESSAGING_SENDER_ID` | SMS sending configuration. |
 | `PUBLIC_WEBHOOK_BASE_URL` | Public HTTPS base URL Telnyx can reach. |
-| `SARVAM_API_KEY` | Sarvam email writing and optional voice assistant AI. |
-| `VOICE_AGENT_API_TOKEN` | Shared secret between the API and optional voice agent. |
+| `SARVAM_API_KEY` | Required voice-agent speech and conversation services; also enables AI email writing. |
+| `VOICE_AGENT_API_TOKEN` | Required 32-character-minimum shared secret between the API and voice agent. |
 | `MAX_ATTACHMENT_SIZE_MB` | Maximum accepted attachment size; default `10`. |
 | `ATTACHMENT_STORAGE_PATH`, `RAW_MAIL_STORAGE_PATH` | Paths on the shared mail-storage volume. |
 
@@ -229,7 +250,7 @@ https://<public-host>/webhooks/telnyx/sms
 
 ### Sarvam AI
 
-Set `SARVAM_API_KEY` for the compose email writer. The browser sends its instruction plus the current subject and body to the authenticated API route, and the API calls the Sarvam 105B chat-completions endpoint. The same key is used by the optional voice agent for its speech and conversation features.
+Set `SARVAM_API_KEY` for the required voice agent and for AI email writing. The browser sends its instruction plus the current subject and body to the authenticated API route, and the API calls the Sarvam 105B chat-completions endpoint. The voice agent also uses this key for speech recognition, language detection, conversation, and speech synthesis.
 
 ### Required Tailscale Funnel
 
@@ -331,11 +352,11 @@ Schedules can be listed at `GET /api/mail/scheduled`, moved with `PATCH /api/mai
 - Session tokens are opaque and stored in browser `sessionStorage`; the server backs sessions with Redis.
 - Passwords are hashed with Argon2id. OTP and reset tokens are stored as hashes and expire.
 - Telnyx webhooks are signature-verified and provider event IDs are deduplicated.
-- The voice agent's internal API calls require `VOICE_AGENT_API_TOKEN`; setup-call tickets are short-lived and single-use.
+- The required voice agent's internal API calls require `VOICE_AGENT_API_TOKEN`; setup-call tickets are short-lived and single-use.
 - SMTP is internal to the Compose network. ClamAV is required before attachments are accepted.
-- Tailscale Funnel is required for Telnyx connectivity in this deployment. The helper exposes the API through its public hostname and forwards Telnyx webhooks and the voice stream; API routes rely on their authentication and webhook-signature checks. MongoDB, Redis, SMTP, and ClamAV remain private.
+- Tailscale Funnel is required for Telnyx connectivity in this deployment. The helper exposes the API through its public hostname and forwards Telnyx webhooks and the voice stream. Authenticated routes require sessions and webhooks verify Telnyx signatures; review route-specific protections for public endpoints. MongoDB, Redis, SMTP, and ClamAV remain private.
 - Mail addresses use the configured local domain. Public MX/DNS, external recipients, groups, and aliases are outside current scope.
-- Browser and voice signup use provider-backed calls/SMS. Configure rate limits and review provider exposure before making an instance public.
+- Browser and mobile signup use provider-backed calls/SMS through the voice agent and Telnyx. Configure rate limits and review provider exposure before making an instance public.
 
 ## Repository map
 

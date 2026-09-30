@@ -2,7 +2,7 @@
 
 ## System overview
 
-Syscall is a self-hosted mail application in which an active user's Indian mobile number maps to an address on a local mail domain, for example `9876543210@niti`. The browser application handles mailbox, profile, authentication, and compose interactions. The Fastify API is the authority for sessions, user and mail state, provider integrations, and queue creation. A separate SMTP service validates and scans mail, while a BullMQ worker performs delivery and notifications. An optional voice agent connects Telnyx call audio to Sarvam speech and conversation services.
+Syscall is a self-hosted mail application in which an active user's Indian mobile number maps to an address on a local mail domain, for example `9876543210@niti`. The browser and Expo mobile applications handle mailbox, profile, authentication, and compose interactions. The browser uses the frontend Nginx proxy; the mobile app connects directly to the API. The Fastify API is the authority for sessions, user and mail state, provider integrations, and queue creation. A separate SMTP service validates and scans mail, while a BullMQ worker performs delivery and notifications. The required voice agent connects Telnyx call audio to Sarvam speech and conversation services.
 
 MongoDB holds durable account and mail records, including one-time password-reset tokens. Redis holds sessions, BullMQ state, OTP verification state, and short-lived voice call authorization and drafts. Raw MIME and attachment files are stored on a shared Docker volume.
 
@@ -12,6 +12,7 @@ MongoDB holds durable account and mail records, including one-time password-rese
 flowchart LR
   subgraph Client[Client]
     Browser[React and Vite SPA]
+    Mobile[Expo and React Native app]
   end
   subgraph Compose[Docker Compose network]
     Nginx[Nginx frontend]
@@ -22,18 +23,22 @@ flowchart LR
     SMTP[Internal SMTP service]
     AV[ClamAV]
     Store[(Shared mail-storage volume)]
-    Voice[Optional voice agent]
+    Voice[Required voice agent]
   end
   Telnyx[Telnyx Voice and Messaging]
+  Funnel[Tailscale Funnel]
   Sarvam[Sarvam AI]
   Browser --> Nginx
   Nginx -->|/api, /calls, health| API
+  Mobile -->|LAN or public EXPO_PUBLIC_API_URL| API
   API --> Mongo
   API --> Redis
   API -->|authenticated email generation| Sarvam
   API -->|outbound calls and SMS| Telnyx
-  Telnyx -->|signed voice and SMS webhooks| API
-  Telnyx <-->|bidirectional media WebSocket| Voice
+  Telnyx -->|signed voice and SMS webhooks| Funnel
+  Funnel -->|API and webhook routes| API
+  Telnyx <-->|bidirectional media WebSocket| Funnel
+  Funnel -->|/voice-stream| Voice
   Voice -->|private actions| API
   Voice <-->|STT, chat, TTS| Sarvam
   Redis --> Worker
@@ -59,7 +64,7 @@ flowchart LR
 | Shared mail-storage volume | Raw `.eml` files and generated attachment files, shared between API, SMTP, and worker containers as needed. |
 | `packages/` | Shared typed configuration, Mongoose models, validation/domain rules, queue helpers, logging, MIME/storage/scanning helpers, and Telnyx integration. |
 
-The default Compose profile includes MongoDB, Redis, ClamAV, API, frontend, SMTP, and worker. `voice-agent` is opt-in through the `voice` profile.
+Docker Compose places `voice-agent` behind the named `voice` profile. That profile is required for the supported Telnyx calling and account-onboarding deployment; start the complete stack with `docker compose --profile voice up -d --build`. The voice agent requires `SARVAM_API_KEY` and a `VOICE_AGENT_API_TOKEN` of at least 32 characters.
 
 ## Browser and API boundary
 
@@ -72,7 +77,7 @@ Authenticated API requests use the `X-Session-Token` header. The frontend keeps 
 | Route group | Purpose |
 | --- | --- |
 | `/api/auth/*` | OTP issue/verification, password login and setup, session inspection/revocation, forgot-password and reset. |
-| `/api/onboarding/call-request` | Starts the IVR account onboarding call with a short-lived name and stream ticket. |
+| `/api/onboarding/call-request` | Starts the conversational voice-agent account onboarding call with a short-lived name and stream ticket. |
 | `/api/ai/compose` | Authenticated Sarvam 105B email creation or revision. |
 | `/api/mail/*` | Mailbox listing/details, send/reply, schedule management, attachments, stars, spam, trash, restore, and delete. |
 | `/api/drafts/*` | Attachment-aware draft create, read, update, delete, and send operations. |
@@ -84,7 +89,7 @@ Authenticated API requests use the `X-Session-Token` header. The frontend keeps 
 
 ## Account creation and authentication
 
-### IVR account creation
+### Voice-call account creation
 
 1. The create-account form collects a name and Indian mobile number, then calls `POST /api/onboarding/call-request`.
 2. The API normalizes the number, rate-limits setup calls, rejects an existing active account, and stores a short-lived hashed stream ticket with the requested name in Redis.
@@ -97,7 +102,7 @@ Ordinary outbound calls do not receive account-creation tools. The caller-name c
 ### Inbound voice calls
 
 1. Telnyx posts an inbound `call.initiated` event to the signed voice webhook. The API checks the called number, answers the call, and sends a six-digit OTP to the caller number with per-call and daily limits.
-2. Telnyx speaks the keypad prompt and gathers six digits followed by `#`. The OTP is stored as a call-bound hash; raw digits are handled only by the signed webhook and never enter Sarvam transcription or chat.
+2. Telnyx speaks the keypad prompt and gathers exactly six digits; collection completes on the sixth digit and does not require a `#` terminator. The OTP is stored as a call-bound hash; raw digits are handled only by the signed webhook and never enter Sarvam transcription or chat.
 3. The API validates the gather event and OTP before starting the media stream. Invalid, expired, or exhausted attempts do not create a voice-agent session or enable personal actions.
 4. After verification, existing accounts receive the ordinary voice assistant. A new number enters account setup: the assistant collects and confirms a name, then requires explicit consent before creating the account.
 5. The inbound stream ticket is one-use, bound to the verified phone and call direction, and server-side action checks reject unverified inbound call contexts.
@@ -149,9 +154,9 @@ Rescheduling creates a new version and invalidates the previous job. Cancellatio
 
 ## Voice assistant and Telnyx
 
-The optional voice profile connects Telnyx calls to Sarvam realtime STT, chat, VAD, and TTS. The agent handles a bidirectional 8 kHz mono PCMU media stream and packetizes synthesized audio into Telnyx media frames. Speech-start events can interrupt active synthesis, clear queued playback, and abort an in-flight response.
+The required voice agent connects Telnyx calls to Sarvam realtime STT, chat, VAD, and TTS. It handles a bidirectional 8 kHz mono PCMU media stream and packetizes synthesized audio into Telnyx media frames. Speech-start events can interrupt active synthesis, clear queued playback, and abort an in-flight response.
 
-The initial greeting is bilingual English/Hindi. Sarvam detects the language for each caller turn; the voice agent selects a supported voice from that turn's locale and transcript script so a caller can change languages mid-call. Supported output languages are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia. The call is conversational and does not use a keypad or DTMF menu.
+The initial greeting is bilingual English/Hindi. Sarvam detects the language for each caller turn; the voice agent selects a supported voice from that turn's locale and transcript script so a caller can change languages mid-call. Supported output languages are English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, and Odia. After inbound callers complete six-digit keypad verification, assistant interactions are conversational and do not use a DTMF menu.
 
 For email actions, the assistant gathers the recipient's ten-digit number, subject, and complete plain-text body. The API derives the sender from the active call's bound phone number, adds `LOCAL_MAIL_DOMAIN` to the recipient, and requires an existing active account. Before an immediate send or schedule, the assistant reads back the destination and summary/time and obtains an unambiguous confirmation. It can list, cancel, or reschedule pending voice-created schedules. Voice message content is held briefly in call-scoped Redis state and is not written to application logs.
 
@@ -171,8 +176,9 @@ Redis holds opaque session data, queue state, OTP verification state, and short-
 
 - The API is published on the host at `API_PORT` (default `3000`) for local development. MongoDB, Redis, SMTP, and ClamAV are internal Compose services.
 - The frontend is published at `FRONTEND_PORT` (default `8080`). Browser requests use its same-origin Nginx proxy.
-- The voice agent's host port binds to loopback. It is included only with the `voice` Compose profile.
-- Tailscale Funnel is required for Telnyx connectivity in this deployment. The included helper publishes the API at the Funnel hostname, explicitly maps the Telnyx webhook paths, and forwards `/voice-stream` to the voice agent. API routes are publicly reachable through Funnel and rely on their authentication and webhook-signature checks; MongoDB, Redis, SMTP, and ClamAV remain private.
+- The Expo mobile app connects directly to the API. Set `EXPO_PUBLIC_API_URL` to an address reachable from the device; use the computer's LAN IP for a physical phone on the same network, `10.0.2.2` for the Android emulator, or `localhost` for the iOS simulator.
+- The voice agent's host port binds to loopback. Docker Compose starts it through the `voice` profile, which is required for the supported Telnyx deployment.
+- Tailscale Funnel is required for Telnyx connectivity in this deployment. The included helper publishes the API at the Funnel hostname, explicitly maps the Telnyx webhook paths, and forwards `/voice-stream` to the voice agent. Authenticated API routes require sessions and webhook routes verify Telnyx signatures; review route-specific protections for public endpoints. MongoDB, Redis, SMTP, and ClamAV remain private.
 - Telnyx webhook signature verification remains enabled. The shared `VOICE_AGENT_API_TOKEN` protects internal agent actions.
 
 ## Recovery and operational behavior

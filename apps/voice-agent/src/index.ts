@@ -407,6 +407,10 @@ async function modelResponse(session: CallSession, language: VoiceLanguage, sign
   };
   // Removes a legacy instruction that bypassed the explicitly confirmed signup state machine.
   system.content = String(system.content).replace('When the caller clearly asks to create/sign up for an account, call create_account immediately; do not ask for confirmation, offer keypad options, or start a menu.', 'A phone number can have only one Syscall account. Never promise or attempt a second account for the same number. Account creation is limited to the explicitly confirmed onboarding flow described in the following instruction.');
+  const voiceContext: ChatMessage = {
+    role: 'system',
+    content: `PRODUCT AND CAPABILITY CONTEXT: Syscall is a phone-number-addressed email service. At the beginning of an ordinary call, or whenever asked what you can do, briefly explain that you can help with account information when the caller is verified, password-reset instructions, writing and sending plain-text email to an existing Syscall account, and scheduling or managing pending scheduled email. Do not repeat the list unnecessarily. Account onboarding is offered only when the application has explicitly put this call into its account_setup phase. A phone number may have only one account; if an account already exists, never offer or attempt to create another. Follow the current accountSetupMessage for the exact onboarding step and require both name confirmation and explicit creation consent. For an active verified account, the application supplies an authoritative account summary containing only the caller's display name, Syscall email address, and whether a password is configured. Treat that summary as the sole source of account facts; if a requested fact is missing or possibly stale, use get_account_summary when available, and otherwise say you cannot verify it. Never imply you can inspect the caller's inbox, change profile settings, sign them in, or access information not exposed by a tool. Password recovery sends instructions by SMS; say they were requested only after the tool accepts the request, and never reveal whether an account exists to an unverified caller. Inbound calls must pass the application's six-digit keypad SMS verification before personal actions; the code is entered on the keypad and must never be requested or repeated in speech. Email actions create or revise complete plain-text drafts for existing Syscall recipients identified by their ten-digit Indian phone number. Do not claim support for external email addresses or attachments. Sending and scheduling require the application's immediate read-back and a clear confirmation on the next turn. For schedules, use the supplied current-time context, India Standard Time, and the exact resolved time; list first when a caller asks to cancel or change an existing schedule, and clarify which message if ambiguous. Never invent account, mail, schedule, delivery, or tool results.`,
+  };
   const accountSetupMessage: ChatMessage = {
     role: 'system',
     content: session.accountSetupPhase === 'collect_name'
@@ -431,6 +435,7 @@ async function modelResponse(session: CallSession, language: VoiceLanguage, sign
     model: 'sarvam-105b-conversations',
     messages: [
       system,
+      voiceContext,
       ...(accountContext ? [accountContext] : []),
       ...(session.accountSetupPhase ? [accountSetupMessage] : []),
       ...(session.pendingEmail ? [{
@@ -794,7 +799,9 @@ async function activateSession(session: CallSession, event: TelnyxEnvelope): Pro
       ? 'Your phone number is verified. It is not linked to an active Syscall account. What name would you like to use for your account?'
       : session.accountSetupPhase === 'confirm_name'
         ? `Let us confirm your account name. I have it as ${session.accountSetupName}. Is that correct? You can tell me the corrected name.`
-        : INITIAL_GREETING;
+        : session.verified && session.accountSummary?.status === 'active'
+          ? `${INITIAL_GREETING} I can check your account details, request password-reset instructions, write or send email, and schedule, review, cancel, or change scheduled email.`
+          : `${INITIAL_GREETING} I can request password-reset instructions, help write or send email, and schedule, review, cancel, or change scheduled email.`;
     void speak(session, greeting, voiceLanguageFor(session.accountSetupPhase === 'collect_name' || session.accountSetupPhase === 'confirm_name' ? 'en-IN' : 'hi-IN')!);
   });
   // Handles speech-start barge-in and finalized caller turns from Sarvam.

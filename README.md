@@ -46,8 +46,18 @@ Syscall gives each active account a local mail address derived from its verified
 - **Write with Sarvam:** describe a new email or ask for edits. The Sarvam 105B model receives the current subject and message as context and returns an updated subject and complete message body.
 - **Send later:** schedule delivery, then review, reschedule, or cancel messages while they are still pending.
 - **Attachment scanning:** the internal SMTP service checks incoming attachments with ClamAV before accepting a message.
-- **Voice assistant:** the required multilingual voice agent handles account setup and supported mail actions over Telnyx calls, using Sarvam speech services.
+- **Voice assistant:** see [Voice agent capabilities](#voice-agent-capabilities) for supported languages, account help, email actions, and call safeguards.
 - **Self-hosted services:** Docker Compose runs the app and its data services together, with databases and SMTP kept off the public interface.
+
+## Voice agent capabilities
+
+The required Telnyx voice agent is conversational rather than a DTMF menu. It recognizes speech and replies in English, Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, or Odia; callers can switch languages during a call and interrupt the agent while it is speaking.
+
+- **Account setup:** on a requested setup call, it guides a caller without an account through giving and confirming a name, then asks for explicit consent before creating the account. Only one account can be created for a phone number.
+- **Existing account help:** after verification, it can tell the caller the account name and Syscall email address, say whether a password is configured, and request password-reset instructions by SMS. Account facts come from the API; it must not guess.
+- **Email:** it can write or revise plain-text email addressed to an existing Syscall account using the recipient's ten-digit Indian phone number. It reads back the destination and a summary, then requires a clear confirmation before sending.
+- **Scheduled email:** it can schedule an email for a confirmed time in India Standard Time, list pending scheduled email, and cancel or reschedule a selected pending message. Scheduling also requires confirmation of the exact time.
+- **Call safeguards and limits:** inbound personal actions are available only after the caller enters the six-digit SMS verification code on the keypad. The voice agent never needs the caller to say the code or a password. It cannot read the inbox or send attachments or email to addresses outside Syscall; use the web or mobile app for those actions.
 
 ## Feature gallery
 
@@ -247,6 +257,10 @@ Authentication expiry and OTP limits, SMTP limits, and ClamAV settings are also 
 https://<public-host>/webhooks/telnyx/voice
 https://<public-host>/webhooks/telnyx/sms
 ```
+
+#### Activating inbound calls from an Indian Jio number
+
+To call the Telnyx phone number from India, first activate a Jio ISD pack that supports calls to the destination country. Then send the administrator your Tailscale Funnel HTTPS address (shown by `npm run tailscale:funnel:status`) and the phone number you want enabled. The administrator will connect that number to the voice application in the Telnyx account. Keep the Funnel address available and tell the administrator if it changes, since Telnyx must be configured with the current public backend address.
 
 ### Sarvam AI
 

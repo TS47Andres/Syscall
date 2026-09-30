@@ -219,8 +219,8 @@ Authentication expiry and OTP limits, SMTP limits, and ClamAV settings are also 
 1. Create/configure a Telnyx Voice API application, outbound connection, and assigned phone number.
 2. Create/configure a Messaging Profile and assign its sender number.
 3. Fill in the Telnyx API key, public key, connection ID, messaging profile ID, and sender settings in `.env`.
-4. Make the Telnyx webhook endpoints reachable over HTTPS and set `PUBLIC_WEBHOOK_BASE_URL`.
-5. Start the `voice` profile for the media-stream assistant and configure Telnyx with the webhook endpoints below.
+4. Start the core services and voice agent, then publish the backend using the required Tailscale Funnel setup below.
+5. Set `PUBLIC_WEBHOOK_BASE_URL` to the Funnel HTTPS hostname, restart the API, and configure Telnyx with these webhook endpoints:
 
 ```text
 https://<public-host>/webhooks/telnyx/voice
@@ -231,17 +231,23 @@ https://<public-host>/webhooks/telnyx/sms
 
 Set `SARVAM_API_KEY` for the compose email writer. The browser sends its instruction plus the current subject and body to the authenticated API route, and the API calls the Sarvam 105B chat-completions endpoint. The same key is used by the optional voice agent for its speech and conversation features.
 
-### Optional Tailscale Funnel
+### Required Tailscale Funnel
 
-For a local development setup, the repository includes a Windows helper for publishing only the Telnyx webhook and voice stream paths through Tailscale Funnel:
+Telnyx must reach Syscall over the public internet. Tailscale Funnel provides that public HTTPS and WebSocket ingress in this deployment. Install Tailscale on the host, sign in, and start the API and voice agent. The helper checks both health endpoints before configuring Funnel:
 
 ```powershell
+docker compose --profile voice up -d --build
 npm run tailscale:funnel
 npm run tailscale:funnel:status
-npm run tailscale:funnel:reset
 ```
 
-Install and sign in to Tailscale first. The helper checks the API and voice-agent health endpoints and binds host ports to loopback. After enabling Funnel, use its HTTPS hostname as `PUBLIC_WEBHOOK_BASE_URL`, restart the services, and use that hostname in the Telnyx webhook URLs. See [ARCHITECTURE.md](ARCHITECTURE.md#network-boundaries) for the exposed paths and private services.
+Copy the HTTPS hostname shown by `npm run tailscale:funnel:status` into `PUBLIC_WEBHOOK_BASE_URL` in `.env`, then restart the API so it uses the new value:
+
+```powershell
+docker compose up -d --force-recreate api
+```
+
+The helper publishes the API at the Funnel hostname, maps `/webhooks/telnyx/` to the API, and forwards `/voice-stream` to the voice agent. The API uses `PUBLIC_WEBHOOK_BASE_URL` to generate Telnyx webhook URLs and the secure WebSocket stream URL. Configure the Telnyx voice and SMS webhooks as `https://<funnel-host>/webhooks/telnyx/voice` and `https://<funnel-host>/webhooks/telnyx/sms`. Confirm Funnel is active with `npm run tailscale:funnel:status` before expecting Telnyx calls or messages. Use `npm run tailscale:funnel:reset` only when intentionally disabling the public ingress. See [ARCHITECTURE.md](ARCHITECTURE.md#network-boundaries) for network boundaries.
 
 ## Development
 
@@ -327,7 +333,7 @@ Schedules can be listed at `GET /api/mail/scheduled`, moved with `PATCH /api/mai
 - Telnyx webhooks are signature-verified and provider event IDs are deduplicated.
 - The voice agent's internal API calls require `VOICE_AGENT_API_TOKEN`; setup-call tickets are short-lived and single-use.
 - SMTP is internal to the Compose network. ClamAV is required before attachments are accepted.
-- Tailscale Funnel is optional. When used, it publishes only the required Telnyx webhook and voice-stream routes; MongoDB, Redis, SMTP, ClamAV, and the rest of the API remain private.
+- Tailscale Funnel is required for Telnyx connectivity in this deployment. The helper exposes the API through its public hostname and forwards Telnyx webhooks and the voice stream; API routes rely on their authentication and webhook-signature checks. MongoDB, Redis, SMTP, and ClamAV remain private.
 - Mail addresses use the configured local domain. Public MX/DNS, external recipients, groups, and aliases are outside current scope.
 - Browser and voice signup use provider-backed calls/SMS. Configure rate limits and review provider exposure before making an instance public.
 

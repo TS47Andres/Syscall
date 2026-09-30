@@ -172,7 +172,7 @@ Redis holds opaque session data, queue state, OTP verification state, and short-
 - The API is published on the host at `API_PORT` (default `3000`) for local development. MongoDB, Redis, SMTP, and ClamAV are internal Compose services.
 - The frontend is published at `FRONTEND_PORT` (default `8080`). Browser requests use its same-origin Nginx proxy.
 - The voice agent's host port binds to loopback. It is included only with the `voice` Compose profile.
-- Tailscale Funnel is optional. The included helper publishes the Telnyx webhook paths and `/voice-stream` only; it keeps data stores, SMTP, ClamAV, and other API routes private.
+- Tailscale Funnel is required for Telnyx connectivity in this deployment. The included helper publishes the API at the Funnel hostname, explicitly maps the Telnyx webhook paths, and forwards `/voice-stream` to the voice agent. API routes are publicly reachable through Funnel and rely on their authentication and webhook-signature checks; MongoDB, Redis, SMTP, and ClamAV remain private.
 - Telnyx webhook signature verification remains enabled. The shared `VOICE_AGENT_API_TOKEN` protects internal agent actions.
 
 ## Recovery and operational behavior

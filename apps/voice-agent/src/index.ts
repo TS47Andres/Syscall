@@ -240,6 +240,11 @@ function moreHelpQuestion(language: VoiceLanguage): string {
   return questions[language.code] ?? questions['en-IN']!;
 }
 
+// Removes a model-generated trailing question before the application appends its own check-in.
+function stripTrailingQuestion(text: string): string {
+  return text.replace(/\s*[^.!?؟。！？]*[?؟？]\s*$/u, '').trim();
+}
+
 // Returns the explicit signup-consent question in the caller's detected language.
 function accountCreationQuestion(language: VoiceLanguage): string {
   const questions: Record<string, string> = {
@@ -391,7 +396,7 @@ function voiceLanguageFromTranscript(text: string): VoiceLanguage | null {
 async function modelResponse(session: CallSession, language: VoiceLanguage, signal: AbortSignal, askMoreHelp: boolean, canConfirmEmail: boolean, emailPreparedThisTurn: boolean, canEndCall: boolean, timeContext: string): Promise<{ content: string | null; toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> }> {
   const languageScript = language.code === 'pa-IN' ? ' For Punjabi, use Punjabi in Gurmukhi script.' : '';
   const turnInstruction = askMoreHelp
-    ? 'The request is complete. Give a brief natural completion statement only; the application will append the localized “Do you need any other help?” question.'
+    ? 'The request is complete. Give a brief natural completion statement only. Do not ask any follow-up question or invite further requests; the application will append exactly one localized “Do you need any other help?” question.'
     : canEndCall
       ? 'The application has just asked whether the caller needs any other help. Interpret the caller’s natural-language answer in context: call end_call only for a clear indication that they need no more help; otherwise continue helping or clarify. Do not use a fixed phrase list.'
       : 'When the caller’s current request is fully answered or completed, call offer_more_help. The application will then ask a brief localized “Do you need any other help?” question. Do not end the call yourself.';
@@ -712,9 +717,9 @@ async function respondToCaller(session: CallSession, transcript: string, languag
       }
       const modelContent = answer.content?.trim().replace(/[`*_#]/g, '').slice(0, 600);
       if (!modelContent) return;
-      const content = modelContent;
+      const content = shouldAskMoreHelp ? stripTrailingQuestion(modelContent) : modelContent;
       const finalContent = shouldAskMoreHelp
-        ? `${content} ${moreHelpQuestion(language)}`
+        ? `${content ? `${content} ` : ''}${moreHelpQuestion(language)}`
         : emailPreparedThisTurn
           ? session.pendingEmail?.scheduledAt
             ? `${content} ${scheduledEmailConfirmationQuestion(language, session.pendingEmail.scheduledAt)}`

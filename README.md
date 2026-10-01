@@ -17,6 +17,9 @@
   <img src="frontend/src/assets/showcase/Emailing.png" alt="Syscall inbox and phone-linked email" width="900" />
 </p>
 
+Youtube Demo Link: https://www.youtube.com/watch?v=EI7i8U1GrsA
+GDrive Link: https://drive.google.com/file/d/1da0hmRe0fF9AJ99Fyo4PxO8qTwgokweB/view?usp=sharing
+
 Syscall gives each active account a local mail address derived from its verified Indian mobile number, such as `9876543210@niti`. It combines browser and mobile mail clients with an API, internal SMTP delivery, background workers, and a Telnyx voice assistant.
 
 > **Status:** Self-hosted development project. The complete deployment includes the voice agent. Telnyx calling and SMS require provider credentials and Tailscale Funnel setup; Sarvam features require an API key. See [Quick start](#quick-start) and [Provider setup](#provider-setup).
